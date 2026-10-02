@@ -5,6 +5,7 @@
 // ============================================================================
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mikrotik_cards_app/models/package_model.dart';
 import 'package:mikrotik_cards_app/models/router_model.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
 
@@ -81,6 +82,54 @@ void main() {
       final afterDeleteList = (afterDeleteResult['data'] as List).cast<RouterModel>();
       expect(afterDeleteList.length, equals(initialCount));
       expect(afterDeleteList.any((r) => r.id == createdRouter.id), isFalse);
+    });
+
+    test('Live Package CRUD lifecycle: create -> getPackages -> delete against live backend', () async {
+      // Step 1: Initial getPackages
+      final initialGet = await ApiClient.getPackages();
+      expect(initialGet['success'], isTrue);
+      final initialList = (initialGet['data'] as List).cast<PackageModel>();
+      final int initialCount = initialList.length;
+
+      // Step 2: Create a package
+      final uniqueCode = 'PKG-TEST-${DateTime.now().millisecondsSinceEpoch}';
+      final createResult = await ApiClient.createPackage(
+        name: 'باقة اختبار حي',
+        code: uniqueCode,
+        downloadSpeedLimit: '6M',
+        uploadSpeedLimit: '3M',
+        durationMinutes: 1440,
+        validityDays: 1,
+        price: 550,
+        hotspotProfileName: 'hs_test_profile',
+      );
+
+      expect(createResult['success'], isTrue,
+          reason: 'createPackage failed: ${createResult['errorMessage']}');
+      expect(createResult['data'], isA<PackageModel>());
+      final createdPkg = createResult['data'] as PackageModel;
+      expect(createdPkg.id.isNotEmpty, isTrue);
+      expect(createdPkg.code, equals(uniqueCode));
+      expect(createdPkg.name, equals('باقة اختبار حي'));
+
+      // Step 3: Verify list contains new package
+      final afterCreate = await ApiClient.getPackages();
+      expect(afterCreate['success'], isTrue);
+      final afterCreateList = (afterCreate['data'] as List).cast<PackageModel>();
+      expect(afterCreateList.length, equals(initialCount + 1));
+      expect(afterCreateList.any((p) => p.id == createdPkg.id), isTrue);
+
+      // Step 4: Delete the package
+      final deleteResult = await ApiClient.deletePackage(createdPkg.id);
+      expect(deleteResult['success'], isTrue,
+          reason: 'deletePackage failed: ${deleteResult['errorMessage']}');
+
+      // Step 5: Verify package is removed
+      final afterDelete = await ApiClient.getPackages();
+      expect(afterDelete['success'], isTrue);
+      final afterDeleteList = (afterDelete['data'] as List).cast<PackageModel>();
+      expect(afterDeleteList.length, equals(initialCount));
+      expect(afterDeleteList.any((p) => p.id == createdPkg.id), isFalse);
     });
   });
 }
