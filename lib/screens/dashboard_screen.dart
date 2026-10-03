@@ -37,11 +37,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   int _buttonShakeCounter = 0;
+  double _todaySalesTotal = 0.0;
+  bool _isLoadingSales = true;
 
   @override
   void initState() {
     super.initState();
     _loadRouters();
+    _loadTodaySales();
+  }
+
+  Future<void> _loadTodaySales() async {
+    setState(() {
+      _isLoadingSales = true;
+    });
+
+    try {
+      final result = await ApiClient.getTodaySalesTotal();
+
+      if (!mounted) return;
+
+      if (result['success'] == true &&
+          result['data'] != null &&
+          result['data'] is Map<String, dynamic>) {
+        final dataMap = result['data'] as Map<String, dynamic>;
+        final raw = dataMap['todayTotal'] ?? dataMap['totalAmount'] ?? 0;
+        setState(() {
+          _todaySalesTotal = (raw is num) ? raw.toDouble() : 0.0;
+          _isLoadingSales = false;
+        });
+      } else {
+        setState(() {
+          _isLoadingSales = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isLoadingSales = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadRouters() async {
@@ -293,7 +329,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // Router List Header & List Content with Pull-To-Refresh
             Expanded(
               child: RefreshIndicator(
-                onRefresh: _loadRouters,
+                onRefresh: () async {
+                  await Future.wait([
+                    _loadRouters(),
+                    _loadTodaySales(),
+                  ]);
+                },
                 color: AppColors.heroGradientStart,
                 backgroundColor: AppColors.pageBg,
                 child: ListView(
@@ -715,12 +756,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(width: 8),
                   // Cards Navigation Button
                   InkWell(
-                    onTap: () {
-                      Navigator.of(context).push(
+                    onTap: () async {
+                      await Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (context) => const CardsListScreen(),
                         ),
                       );
+                      _loadTodaySales();
                     },
                     borderRadius: BorderRadius.circular(14),
                     child: Container(
@@ -861,7 +903,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(width: 12),
 
-                  // Stat Card 2: مبيعات اليوم (DEMO / تجريبي)
+                  // Stat Card 2: مبيعات اليوم
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -880,68 +922,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.payments_outlined,
-                                    size: 14,
-                                    color: Colors.white.withValues(alpha: 0.9),
-                                  ),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    'مبيعات اليوم',
-                                    style: GoogleFonts.cairo(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white.withValues(alpha: 0.9),
-                                    ),
-                                  ),
-                                ],
+                              Icon(
+                                Icons.payments_outlined,
+                                size: 14,
+                                color: Colors.white.withValues(alpha: 0.9),
                               ),
-                              // Small demo badge (Rule 21)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'تجريبي',
-                                  style: GoogleFonts.cairo(
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.accentYellow,
-                                  ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'مبيعات اليوم',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.9),
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: CountUpText(
-                              targetValue: 18400,
-                              suffix: ' جنيه سوداني',
-                              formatter: (val) {
-                                final formatted = val.toString().replaceAllMapped(
-                                  RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-                                  (Match m) => '${m[1]},',
-                                );
-                                return '$formatted جنيه سوداني';
-                              },
-                              style: GoogleFonts.cairo(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.accentYellow,
+                          if (_isLoadingSales)
+                            const SizedBox(
+                              height: 30,
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      AppColors.accentYellow,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: CountUpText(
+                                targetValue: _todaySalesTotal.round(),
+                                suffix: ' جنيه سوداني',
+                                formatter: (val) {
+                                  final formatted = val.toString().replaceAllMapped(
+                                    RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+                                    (Match m) => '${m[1]},',
+                                  );
+                                  return '$formatted جنيه سوداني';
+                                },
+                                style: GoogleFonts.cairo(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.accentYellow,
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                     ),

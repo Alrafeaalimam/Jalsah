@@ -35,6 +35,8 @@ class _CardsListScreenState extends State<CardsListScreen> {
   late String _selectedStatus;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  final Set<String> _selectedCardIds = {};
+  bool _isSubmittingSale = false;
 
   static const List<Map<String, String>> _statusFilters = [
     {'key': 'ALL', 'label': 'الكل'},
@@ -59,6 +61,16 @@ class _CardsListScreenState extends State<CardsListScreen> {
     super.dispose();
   }
 
+  double get _selectedCardsTotalPrice {
+    double sum = 0.0;
+    for (final card in _cards) {
+      if (_selectedCardIds.contains(card.id)) {
+        sum += card.price;
+      }
+    }
+    return sum;
+  }
+
   Future<void> _loadCards() async {
     setState(() {
       _isLoading = true;
@@ -77,6 +89,11 @@ class _CardsListScreenState extends State<CardsListScreen> {
     if (result['success'] == true) {
       setState(() {
         _cards = (result['data'] as List<dynamic>).cast<CardModel>();
+        _selectedCardIds.removeWhere(
+          (id) => !_cards.any(
+            (c) => c.id == id && c.status.toUpperCase() == 'AVAILABLE',
+          ),
+        );
         _isLoading = false;
         _errorMessage = null;
       });
@@ -88,6 +105,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
       });
     }
   }
+
 
   void _onStatusFilterSelected(String statusKey) {
     if (_selectedStatus == statusKey) return;
@@ -167,9 +185,13 @@ class _CardsListScreenState extends State<CardsListScreen> {
             ),
           ],
         ),
+        bottomNavigationBar: _selectedCardIds.isNotEmpty
+            ? _buildFloatingBottomBar()
+            : null,
       ),
     );
   }
+
 
   Widget _buildTopBanner({
     required int totalCount,
@@ -839,190 +861,679 @@ class _CardsListScreenState extends State<CardsListScreen> {
   }
 
   Widget _buildCardItem(CardModel card) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.pageBg,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          const BoxShadow(
-            color: AppColors.shadowLight,
-            offset: Offset(-3, -3),
-            blurRadius: 6,
+    final bool isAvailable = card.status.toUpperCase() == 'AVAILABLE';
+    final bool isSelected = _selectedCardIds.contains(card.id);
+
+    return InkWell(
+      onTap: isAvailable
+          ? () {
+              setState(() {
+                if (isSelected) {
+                  _selectedCardIds.remove(card.id);
+                } else {
+                  _selectedCardIds.add(card.id);
+                }
+              });
+            }
+          : null,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.heroGradientStart.withValues(alpha: 0.05)
+              : AppColors.pageBg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.heroGradientStart
+                : Colors.transparent,
+            width: 1.5,
           ),
-          BoxShadow(
-            color: AppColors.shadowDark.withValues(alpha: 0.65),
-            offset: const Offset(3, 3),
-            blurRadius: 6,
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Top Row: Status badge and Price
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Status Badge
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: card.statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: card.statusColor.withValues(alpha: 0.35),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+          boxShadow: [
+            const BoxShadow(
+              color: AppColors.shadowLight,
+              offset: Offset(-3, -3),
+              blurRadius: 6,
+            ),
+            BoxShadow(
+              color: AppColors.shadowDark.withValues(alpha: 0.65),
+              offset: const Offset(3, 3),
+              blurRadius: 6,
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Top Row: Checkbox (if AVAILABLE), Status badge and Price
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
                   children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        color: card.statusColor,
-                        shape: BoxShape.circle,
+                    if (isAvailable) ...[
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: Checkbox(
+                          value: isSelected,
+                          activeColor: AppColors.heroGradientStart,
+                          checkColor: AppColors.accentYellow,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          side: BorderSide(
+                            color: isSelected
+                                ? AppColors.heroGradientStart
+                                : AppColors.textMuted.withValues(alpha: 0.6),
+                            width: 1.5,
+                          ),
+                          onChanged: (val) {
+                            setState(() {
+                              if (val == true) {
+                                _selectedCardIds.add(card.id);
+                              } else {
+                                _selectedCardIds.remove(card.id);
+                              }
+                            });
+                          },
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      card.statusTextArabic,
-                      style: GoogleFonts.cairo(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: card.statusColor,
+                      const SizedBox(width: 8),
+                    ],
+
+                    // Status Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: card.statusColor.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: card.statusColor.withValues(alpha: 0.35),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              color: card.statusColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            card.statusTextArabic,
+                            style: GoogleFonts.cairo(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: card.statusColor,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
 
-              // Creation Info / Price
-              if (card.price > 0)
-                Text(
-                  '${card.formattedPrice} SDG',
-                  style: GoogleFonts.cairo(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
+                // Creation Info / Price
+                if (card.price > 0)
+                  Text(
+                    '${card.formattedPrice} SDG',
+                    style: GoogleFonts.cairo(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.heroGradientStart,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Username Row
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.person_rounded,
+                    size: 18,
                     color: AppColors.heroGradientStart,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 12),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'اسم المستخدم (User)',
+                        style: GoogleFonts.cairo(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      SelectableText(
+                        card.username,
+                        style: GoogleFonts.cairo(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(
+                    Icons.copy_rounded,
+                    size: 18,
+                    color: AppColors.heroGradientStart,
+                  ),
+                  tooltip: 'نسخ اسم المستخدم',
+                  onPressed: () => _copyToClipboard(card.username, 'اسم المستخدم'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
 
-          // Username Row
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.heroGradientStart.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+            // Password Row
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentYellow.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.lock_outline_rounded,
+                    size: 18,
+                    color: AppColors.textDark,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.person_rounded,
-                  size: 18,
-                  color: AppColors.heroGradientStart,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'اسم المستخدم (User)',
-                      style: GoogleFonts.cairo(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textMuted,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'كلمة المرور (PIN)',
+                        style: GoogleFonts.cairo(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted,
+                        ),
                       ),
-                    ),
-                    SelectableText(
-                      card.username,
-                      style: GoogleFonts.cairo(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textDark,
-                        letterSpacing: 1.2,
+                      SelectableText(
+                        card.password,
+                        style: GoogleFonts.cairo(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          letterSpacing: 2,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(
-                  Icons.copy_rounded,
-                  size: 18,
-                  color: AppColors.heroGradientStart,
+                IconButton(
+                  icon: const Icon(
+                    Icons.copy_rounded,
+                    size: 18,
+                    color: AppColors.textDark,
+                  ),
+                  tooltip: 'نسخ كلمة المرور',
+                  onPressed: () => _copyToClipboard(card.password, 'كلمة المرور'),
                 ),
-                tooltip: 'نسخ اسم المستخدم',
-                onPressed: () => _copyToClipboard(card.username, 'اسم المستخدم'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // Password Row
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.accentYellow.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.lock_outline_rounded,
-                  size: 18,
-                  color: AppColors.textDark,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'كلمة المرور (PIN)',
-                      style: GoogleFonts.cairo(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                    SelectableText(
-                      card.password,
-                      style: GoogleFonts.cairo(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textDark,
-                        letterSpacing: 2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(
-                  Icons.copy_rounded,
-                  size: 18,
-                  color: AppColors.textDark,
-                ),
-                tooltip: 'نسخ كلمة المرور',
-                onPressed: () => _copyToClipboard(card.password, 'كلمة المرور'),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  Widget _buildFloatingBottomBar() {
+    final count = _selectedCardIds.length;
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        child: PressableNeumorphicCard(
+          onTap: _showSaleBottomSheet,
+          backgroundColor: AppColors.accentYellow,
+          borderRadius: BorderRadius.circular(16),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.textDark.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.point_of_sale_rounded,
+                  size: 20,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'بيع ($count) ${count == 1 ? 'كرت' : 'كروت'}',
+                style: GoogleFonts.cairo(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const Spacer(),
+              if (_selectedCardsTotalPrice > 0) ...[
+                Text(
+                  '${_selectedCardsTotalPrice.toStringAsFixed(0)} SDG',
+                  style: GoogleFonts.cairo(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              const Icon(
+                Icons.arrow_back_ios_rounded,
+                size: 14,
+                color: AppColors.textDark,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSaleBottomSheet() {
+    String selectedPaymentMethod = 'CASH';
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: Container(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  20,
+                  20,
+                  MediaQuery.of(context).viewInsets.bottom + 24,
+                ),
+                decoration: const BoxDecoration(
+                  color: AppColors.pageBg,
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x33000000),
+                      blurRadius: 20,
+                      offset: Offset(0, -5),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle bar
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.textMuted.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Title
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'إتمام عملية البيع',
+                          style: GoogleFonts.cairo(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          color: AppColors.textMuted,
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Summary Card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.heroGradientStart.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppColors.heroGradientStart.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'عدد الكروت المحددة: ${_selectedCardIds.length}',
+                            style: GoogleFonts.cairo(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.heroGradientStart,
+                            ),
+                          ),
+                          Text(
+                            'الإجمالي: ${_selectedCardsTotalPrice.toStringAsFixed(0)} SDG',
+                            style: GoogleFonts.cairo(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.heroGradientStart,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+
+                    Text(
+                      'طريقة الدفع',
+                      style: GoogleFonts.cairo(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Payment options
+                    _buildPaymentOption(
+                      label: 'نقداً (كاش)',
+                      value: 'CASH',
+                      icon: Icons.payments_rounded,
+                      groupValue: selectedPaymentMethod,
+                      onChanged: (val) {
+                        setSheetState(() {
+                          selectedPaymentMethod = val!;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _buildPaymentOption(
+                      label: 'تحويل بنكي (بنكك / فوري)',
+                      value: 'BANK_TRANSFER',
+                      icon: Icons.account_balance_rounded,
+                      groupValue: selectedPaymentMethod,
+                      onChanged: (val) {
+                        setSheetState(() {
+                          selectedPaymentMethod = val!;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    _buildPaymentOption(
+                      label: 'محفظة إلكترونية',
+                      value: 'MOBILE_MONEY',
+                      icon: Icons.phone_android_rounded,
+                      groupValue: selectedPaymentMethod,
+                      onChanged: (val) {
+                        setSheetState(() {
+                          selectedPaymentMethod = val!;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 22),
+
+                    // Confirm Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: PressableNeumorphicCard(
+                        onTap: _isSubmittingSale
+                            ? null
+                            : () async {
+                                Navigator.of(sheetContext).pop();
+                                await _performSale(selectedPaymentMethod);
+                              },
+                        backgroundColor: AppColors.accentYellow,
+                        borderRadius: BorderRadius.circular(14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Center(
+                          child: Text(
+                            'تأكيد البيع',
+                            style: GoogleFonts.cairo(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPaymentOption({
+    required String label,
+    required String value,
+    required IconData icon,
+    required String groupValue,
+    required ValueChanged<String?> onChanged,
+  }) {
+    final isSelected = value == groupValue;
+    return InkWell(
+      onTap: () => onChanged(value),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.accentYellow.withValues(alpha: 0.15)
+              : AppColors.pageBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.accentYellow
+                : AppColors.textMuted.withValues(alpha: 0.2),
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? AppColors.textDark : AppColors.textMuted,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.cairo(
+                  fontSize: 13.5,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                  color: AppColors.textDark,
+                ),
+              ),
+            ),
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected
+                      ? AppColors.heroGradientStart
+                      : AppColors.textMuted.withValues(alpha: 0.5),
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? Center(
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.heroGradientStart,
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+  Future<void> _performSale(String paymentMethod) async {
+    setState(() {
+      _isSubmittingSale = true;
+    });
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.heroGradientStart,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'جارٍ إتمام عملية البيع...',
+              style: GoogleFonts.cairo(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final cardIdsToSell = _selectedCardIds.toList();
+    final count = cardIdsToSell.length;
+
+    final result = await ApiClient.createSale(
+      cardIds: cardIdsToSell,
+      paymentMethod: paymentMethod,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _isSubmittingSale = false;
+    });
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    if (result['success'] == true) {
+      setState(() {
+        _selectedCardIds.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.statusOnline,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'تم بيع $count ${count == 1 ? 'كرت' : 'كروت'} بنجاح!',
+                  style: GoogleFonts.cairo(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      _loadCards();
+    } else {
+      final err = result['errorMessage'] ?? 'فشل إتمام عملية البيع';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.statusOffline,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  err,
+                  style: GoogleFonts.cairo(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
 }
+

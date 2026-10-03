@@ -136,7 +136,7 @@ void main() {
       expect(find.text('المدير'), findsOneWidget);
       expect(find.text('لا توجد راوترات مسجلة بعد'), findsOneWidget);
       expect(find.text('0 راوترات مسجلة'), findsOneWidget);
-      expect(find.text('تجريبي'), findsOneWidget);
+      expect(find.text('مبيعات اليوم'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -144,10 +144,16 @@ void main() {
 
     testWidgets('renders Error state and retries on failure',
         (WidgetTester tester) async {
-      int requestCount = 0;
+      int routerRequestCount = 0;
       ApiClient.client = MockClient((request) async {
-        requestCount++;
-        if (requestCount == 1) {
+        if (request.url.path.contains('sales')) {
+          return utf8Response({
+            'success': true,
+            'data': {'todayTotal': 0.0, 'totalAmount': 0.0},
+          }, 200);
+        }
+        routerRequestCount++;
+        if (routerRequestCount == 1) {
           return utf8Response({
             'success': false,
             'errorCode': 'SERVER_ERROR',
@@ -180,7 +186,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      expect(requestCount, equals(2));
+      expect(routerRequestCount, equals(2));
       expect(find.text('لا توجد راوترات مسجلة بعد'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());

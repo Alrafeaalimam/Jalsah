@@ -852,4 +852,160 @@ class ApiClient {
       };
     }
   }
+
+  /// Records a sale transaction for one or more available cards.
+  ///
+  /// Parameters:
+  /// - [cardIds]: Required non-empty list of card UUIDs.
+  /// - [paymentMethod]: One of 'CASH', 'BANK_TRANSFER', 'MOBILE_MONEY'.
+  ///
+  /// Returns:
+  /// Success: {'success': true, 'data': `Map<String, dynamic>`}
+  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
+  static Future<Map<String, dynamic>> createSale({
+    required List<String> cardIds,
+    required String paymentMethod,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sales');
+    final payload = jsonEncode({
+      'cardIds': cardIds,
+      'paymentMethod': paymentMethod,
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: payload,
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          body['success'] == true) {
+        return body;
+      } else if (response.statusCode == 422) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'CARD_NOT_AVAILABLE',
+          'errorMessage': body['errorMessage'] ??
+              'واحد أو أكثر من الكروت المختارة غير متاح للبيع.',
+        };
+      } else if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'CARD_ALREADY_SOLD',
+          'errorMessage': body['errorMessage'] ??
+              'تم بيع أحد الكروت المختارة مسبقاً في معاملة أخرى.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': 'VALIDATION_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'بيانات البيع غير صالحة، يرجى التأكد من اختيار الكروت وطريقة الدفع.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل إتمام عملية البيع (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage':
+            'انتهت مهلة الاتصال بالخادم أثناء إتمام عملية البيع. يرجى المحاولة ثانية.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء إتمام عملية البيع: $e',
+      };
+    }
+  }
+
+  /// Retrieves the today's aggregated sales total for the tenant.
+  ///
+  /// Returns:
+  /// Success: {'success': true, 'data': {'todayTotal': double, 'totalAmount': double, ...}}
+  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
+  static Future<Map<String, dynamic>> getTodaySalesTotal() async {
+    final uri = Uri.parse('$baseUrl/api/v1/sales/today-total');
+
+    try {
+      final response = await client.get(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+        },
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return body;
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل جلب إجمالي مبيعات اليوم (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage':
+            'انتهت مهلة الاتصال بالخادم أثناء جلب إجمالي المبيعات.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب إجمالي المبيعات: $e',
+      };
+    }
+  }
 }
+
