@@ -19,6 +19,7 @@ import 'add_router_screen.dart';
 import 'cards_list_screen.dart';
 import 'generate_cards_screen.dart';
 import 'packages_screen.dart';
+import 'sales_report_screen.dart';
 import 'temp_login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -932,82 +933,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(width: 12),
 
-                  // Stat Card 2: مبيعات اليوم
+                  // Stat Card 2: مبيعات اليوم (قابل للنقر لفتح تقارير المبيعات)
                   Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.22),
-                          width: 1,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.payments_outlined,
-                                size: 14,
-                                color: Colors.white.withValues(alpha: 0.9),
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                'مبيعات اليوم',
-                                style: GoogleFonts.cairo(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                ),
-                              ),
-                            ],
+                    child: InkWell(
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const SalesReportScreen(),
                           ),
-                          const SizedBox(height: 8),
-                          if (_isLoadingSales)
-                            const SizedBox(
-                              height: 30,
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      AppColors.accentYellow,
+                        );
+                        _loadTodaySales();
+                      },
+                      borderRadius: BorderRadius.circular(18),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.22),
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.payments_outlined,
+                                      size: 14,
+                                      color: Colors.white.withValues(alpha: 0.9),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      'مبيعات اليوم',
+                                      style: GoogleFonts.cairo(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white.withValues(alpha: 0.9),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Icon(
+                                  Icons.arrow_back_ios_new_rounded,
+                                  size: 11,
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            if (_isLoadingSales)
+                              const SizedBox(
+                                height: 30,
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        AppColors.accentYellow,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            )
-                          else
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerRight,
-                              child: CountUpText(
-                                targetValue: _todaySalesTotal.round(),
-                                suffix: ' جنيه سوداني',
-                                formatter: (val) {
-                                  final formatted = val.toString().replaceAllMapped(
-                                    RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-                                    (Match m) => '${m[1]},',
-                                  );
-                                  return '$formatted جنيه سوداني';
-                                },
-                                style: GoogleFonts.cairo(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.accentYellow,
+                              )
+                            else
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerRight,
+                                child: CountUpText(
+                                  targetValue: _todaySalesTotal.round(),
+                                  suffix: ' جنيه سوداني',
+                                  formatter: (val) {
+                                    final formatted = val.toString().replaceAllMapped(
+                                      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+                                      (Match m) => '${m[1]},',
+                                    );
+                                    return '$formatted جنيه سوداني';
+                                  },
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.accentYellow,
+                                  ),
                                 ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

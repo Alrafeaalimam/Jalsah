@@ -15,6 +15,7 @@ import '../models/card_batch_model.dart';
 import '../models/card_model.dart';
 import '../models/package_model.dart';
 import '../models/router_model.dart';
+import '../models/sale_model.dart';
 
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
@@ -1138,6 +1139,91 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء جلب إجمالي المبيعات: $e',
+      };
+    }
+  }
+
+  /// Retrieves sales transactions with optional date range filtering.
+  static Future<Map<String, dynamic>> getSales({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
+    final queryParams = <String, String>{};
+    if (dateFrom != null) {
+      queryParams['dateFrom'] = dateFrom.toIso8601String();
+    }
+    if (dateTo != null) {
+      queryParams['dateTo'] = dateTo.toIso8601String();
+    }
+
+    final uri = Uri.parse('$baseUrl/api/v1/sales').replace(
+      queryParameters: queryParams.isNotEmpty ? queryParams : null,
+    );
+
+    try {
+      final response = await client.get(
+        uri,
+        headers: _buildHeaders(),
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> salesJson = body['data'] as List<dynamic>? ?? [];
+        final sales = salesJson
+            .map((item) => SaleModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+
+        return {
+          'success': true,
+          'data': sales,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': 'VALIDATION_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'معاملات البحث غير صالحة.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل جلب قائمة المبيعات (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء جلب المبيعات.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب المبيعات: $e',
       };
     }
   }
