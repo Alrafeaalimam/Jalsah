@@ -12,7 +12,9 @@ import '../models/card_batch_model.dart';
 import '../models/card_model.dart';
 import '../models/package_model.dart';
 import '../services/api_client.dart';
+import '../services/card_pdf_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/card_voucher_widget.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'cards_list_screen.dart';
@@ -172,6 +174,112 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       _quantityController.text = '10';
       _prefixController.clear();
     });
+  }
+
+  bool _isExportingPdf = false;
+
+  Future<void> _exportBatchPdf() async {
+    if (_generatedCards == null || _generatedCards!.isEmpty) return;
+
+    setState(() {
+      _isExportingPdf = true;
+    });
+
+    try {
+      await CardPdfService.shareBatchCardsPdf(
+        cards: _generatedCards!,
+        package: _selectedPackage,
+        batchNumber: _generatedBatch?.batchNumber,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text(
+              'تعذر تصدير ملف PDF: $e',
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExportingPdf = false;
+        });
+      }
+    }
+  }
+
+  void _showVoucherPreview(CardModel card) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              CardVoucherWidget(
+                card: card,
+                package: _selectedPackage,
+              ),
+              const SizedBox(height: 20),
+              PressableNeumorphicCard(
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  CardPdfService.shareSingleCardPdf(
+                    card: card,
+                    package: _selectedPackage,
+                  );
+                },
+                backgroundColor: AppColors.accentYellow,
+                borderRadius: BorderRadius.circular(14),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: AppColors.textDark,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'مشاركة / طباعة هذا الكرت (PDF)',
+                      style: GoogleFonts.cairo(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _copyToClipboard(String text, String label) {
@@ -1085,11 +1193,73 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 6),
+
+                // Voucher Preview Button
+                IconButton(
+                  icon: const Icon(
+                    Icons.qr_code_2_rounded,
+                    size: 20,
+                    color: AppColors.heroGradientStart,
+                  ),
+                  tooltip: 'معاينة بطاقة الكرت',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => _showVoucherPreview(card),
+                ),
               ],
             ),
           );
         }),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
+
+        // PDF Export / Share Full Batch Button
+        PressableNeumorphicCard(
+          onTap: _isExportingPdf ? null : _exportBatchPdf,
+          backgroundColor: AppColors.accentYellow,
+          borderRadius: BorderRadius.circular(16),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_isExportingPdf) ...[
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.textDark,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'جارٍ تجهيز ملف PDF للدفعة...',
+                  style: GoogleFonts.cairo(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ] else ...[
+                const Icon(
+                  Icons.picture_as_pdf_rounded,
+                  color: AppColors.textDark,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'تحميل / مشاركة PDF لكل الدفعة (${cards.length} كرت)',
+                  style: GoogleFonts.cairo(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
 
         // Action Buttons Row
         Row(

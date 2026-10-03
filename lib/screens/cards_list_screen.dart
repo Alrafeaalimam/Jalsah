@@ -9,8 +9,11 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/card_model.dart';
+import '../models/package_model.dart';
 import '../services/api_client.dart';
+import '../services/card_pdf_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/card_voucher_widget.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'generate_cards_screen.dart';
 
@@ -37,6 +40,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _selectedCardIds = {};
   bool _isSubmittingSale = false;
+  Map<String, PackageModel> _packagesMap = {};
 
   static const List<Map<String, String>> _statusFilters = [
     {'key': 'ALL', 'label': 'الكل'},
@@ -97,6 +101,18 @@ class _CardsListScreenState extends State<CardsListScreen> {
         _isLoading = false;
         _errorMessage = null;
       });
+
+      // Lazily load packages map for rich voucher previews if empty
+      if (_packagesMap.isEmpty) {
+        ApiClient.getPackages().then((pkgRes) {
+          if (mounted && pkgRes['success'] == true) {
+            final pkgs = (pkgRes['data'] as List<dynamic>).cast<PackageModel>();
+            setState(() {
+              _packagesMap = {for (final p in pkgs) p.id: p};
+            });
+          }
+        });
+      }
     } else {
       setState(() {
         _isLoading = false;
@@ -104,6 +120,75 @@ class _CardsListScreenState extends State<CardsListScreen> {
             result['errorMessage'] ?? 'تعذر الاتصال بالخادم لجلب قائمة الكروت';
       });
     }
+  }
+
+  void _showCardVoucherModal(CardModel card) {
+    final pkg = _packagesMap[card.packageId];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              CardVoucherWidget(
+                card: card,
+                package: pkg,
+              ),
+              const SizedBox(height: 20),
+              PressableNeumorphicCard(
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  CardPdfService.shareSingleCardPdf(
+                    card: card,
+                    package: pkg,
+                  );
+                },
+                backgroundColor: AppColors.accentYellow,
+                borderRadius: BorderRadius.circular(14),
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.picture_as_pdf_rounded,
+                      color: AppColors.textDark,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'مشاركة / طباعة هذا الكرت (PDF)',
+                      style: GoogleFonts.cairo(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
 
@@ -984,16 +1069,34 @@ class _CardsListScreenState extends State<CardsListScreen> {
                   ],
                 ),
 
-                // Creation Info / Price
-                if (card.price > 0)
-                  Text(
-                    '${card.formattedPrice} SDG',
-                    style: GoogleFonts.cairo(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.heroGradientStart,
+                // Creation Info / Price & QR Voucher Action
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (card.price > 0) ...[
+                      Text(
+                        '${card.formattedPrice} SDG',
+                        style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.heroGradientStart,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    IconButton(
+                      icon: const Icon(
+                        Icons.qr_code_2_rounded,
+                        size: 20,
+                        color: AppColors.heroGradientStart,
+                      ),
+                      tooltip: 'معاينة وطباعة بطاقة الكرت',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () => _showCardVoucherModal(card),
                     ),
-                  ),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 12),

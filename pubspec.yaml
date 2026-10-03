@@ -38,6 +38,9 @@ dependencies:
   flutter_animate: ^4.5.0
   http: ^1.2.2
   shared_preferences: ^2.5.5
+  qr_flutter: ^4.1.0
+  pdf: ^3.13.1
+  printing: ^5.15.1
 
 dev_dependencies:
   flutter_test:
