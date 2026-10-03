@@ -16,6 +16,7 @@ import '../models/card_model.dart';
 import '../models/package_model.dart';
 import '../models/router_model.dart';
 import '../models/sale_model.dart';
+import '../models/staff_user_model.dart';
 
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
@@ -30,6 +31,26 @@ class ApiClient {
 
   /// Whether an authorization token is currently held.
   static bool get isAuthenticated => _authToken != null && _authToken!.isNotEmpty;
+
+  /// Extracts the user's role from the stored auth token without any network request.
+  static String? getUserRole() {
+    if (_authToken == null || _authToken!.isEmpty) return null;
+    try {
+      final parts = _authToken!.split('.');
+      if (parts.length != 3) return null;
+      final normalized = base64Url.normalize(parts[1]);
+      final payload = jsonDecode(utf8.decode(base64Url.decode(normalized)));
+      return payload['role'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Whether the authenticated user has an administrator role (TENANT_ADMIN or SUPER_ADMIN).
+  static bool get isAdmin {
+    final role = getUserRole();
+    return role == 'TENANT_ADMIN' || role == 'SUPER_ADMIN';
+  }
 
   /// Manually set the auth token (useful in tests or when restored).
   static void setAuthToken(String? token) {
@@ -1224,6 +1245,258 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء جلب المبيعات: $e',
+      };
+    }
+  }
+
+  /// Fetches all staff users for the current tenant (requires TENANT_ADMIN or SUPER_ADMIN).
+  static Future<Map<String, dynamic>> getStaffUsers() async {
+    final uri = Uri.parse('$baseUrl/api/v1/users');
+
+    try {
+      final response = await client.get(
+        uri,
+        headers: _buildHeaders(),
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> usersJson = body['data'] as List<dynamic>? ?? [];
+        final users = usersJson
+            .map((item) => StaffUserModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+
+        return {
+          'success': true,
+          'data': users,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'ليس لديك صلاحية لعرض قائمة الموظفين.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل جلب قائمة الموظفين (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء جلب الموظفين.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب الموظفين: $e',
+      };
+    }
+  }
+
+  /// Creates a new staff member under the tenant (requires TENANT_ADMIN or SUPER_ADMIN).
+  static Future<Map<String, dynamic>> createStaffUser({
+    required String username,
+    required String password,
+    required String fullName,
+    required String role,
+    String? email,
+    String? phone,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/users');
+    final payloadMap = <String, dynamic>{
+      'username': username.trim(),
+      'password': password,
+      'fullName': fullName.trim(),
+      'role': role,
+    };
+    if (email != null && email.trim().isNotEmpty) {
+      payloadMap['email'] = email.trim();
+    }
+    if (phone != null && phone.trim().isNotEmpty) {
+      payloadMap['phone'] = phone.trim();
+    }
+
+    try {
+      final response = await client.post(
+        uri,
+        headers: _buildHeaders(isJson: true),
+        body: jsonEncode(payloadMap),
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          body['success'] == true) {
+        return {
+          'success': true,
+          'data': StaffUserModel.fromJson(body['data'] as Map<String, dynamic>),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'ليس لديك صلاحية لإضافة موظف جديد.',
+        };
+      } else if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'errorCode': 'USERNAME_EXISTS',
+          'errorMessage': body['errorMessage'] ?? 'اسم المستخدم مسجل مسبقاً في هذه الشبكة.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': 'VALIDATION_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'بيانات الموظف المدخلة غير صالحة.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل إضافة الموظف الجديد (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء إضافة الموظف.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء إضافة الموظف: $e',
+      };
+    }
+  }
+
+  /// Deactivates a staff member (status becomes INACTIVE, preserving audit trail).
+  static Future<Map<String, dynamic>> deactivateStaffUser(String userId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/users/$userId/deactivate');
+
+    try {
+      final response = await client.patch(
+        uri,
+        headers: _buildHeaders(),
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': StaffUserModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم تعطيل حساب الموظف بنجاح',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'ليس لديك صلاحية لتعطيل الموظفين.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'CANNOT_DEACTIVATE',
+          'errorMessage': body['errorMessage'] ?? 'لا يمكن تعطيل هذا الحساب.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'USER_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? 'المستخدم المطلوب غير موجود.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل تعطيل حساب الموظف (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء تعطيل الموظف.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء تعطيل الموظف: $e',
       };
     }
   }

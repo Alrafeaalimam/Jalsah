@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
@@ -67,6 +68,17 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
       final fullName = userData?['fullName'] as String? ??
           userData?['username'] as String? ??
           'المدير';
+
+      // Store extracted role from token
+      final tokenRole = ApiClient.getUserRole() ?? userData?['role'] as String?;
+      if (tokenRole != null && tokenRole.isNotEmpty) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('user_role', tokenRole);
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
