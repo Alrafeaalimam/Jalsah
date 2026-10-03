@@ -19,6 +19,7 @@ import 'add_router_screen.dart';
 import 'cards_list_screen.dart';
 import 'generate_cards_screen.dart';
 import 'packages_screen.dart';
+import 'temp_login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String userName;
@@ -39,6 +40,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _buttonShakeCounter = 0;
   double _todaySalesTotal = 0.0;
   bool _isLoadingSales = true;
+  bool _isRedirectingToLogin = false;
+
+  void _handleUnauthorized() {
+    if (!mounted || _isRedirectingToLogin) return;
+    _isRedirectingToLogin = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const TempLoginScreen()),
+        (route) => false,
+      );
+    });
+  }
 
   @override
   void initState() {
@@ -56,6 +70,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final result = await ApiClient.getTodaySalesTotal();
 
       if (!mounted) return;
+
+      if (result['errorCode'] == 'UNAUTHORIZED') {
+        _handleUnauthorized();
+        return;
+      }
 
       if (result['success'] == true &&
           result['data'] != null &&
@@ -89,6 +108,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final result = await ApiClient.getRouters();
 
     if (!mounted) return;
+
+    if (result['errorCode'] == 'UNAUTHORIZED') {
+      _handleUnauthorized();
+      return;
+    }
 
     if (result['success'] == true) {
       setState(() {
@@ -230,6 +254,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    if (result['errorCode'] == 'UNAUTHORIZED') {
+      _handleUnauthorized();
+      return;
+    }
 
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(

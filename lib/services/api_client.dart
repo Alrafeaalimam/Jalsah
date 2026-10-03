@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/card_batch_model.dart';
 import '../models/card_model.dart';
@@ -18,28 +19,73 @@ import '../models/router_model.dart';
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
   static const Duration timeoutDuration = Duration(seconds: 5);
-  static http.Client client = http.Client();
+  static const String tokenStorageKey = 'auth_token';
 
-  static void resetClient() {
-    client = http.Client();
+  static http.Client client = http.Client();
+  static String? _authToken;
+
+  /// Returns the current in-memory authorization token.
+  static String? get authToken => _authToken;
+
+  /// Whether an authorization token is currently held.
+  static bool get isAuthenticated => _authToken != null && _authToken!.isNotEmpty;
+
+  /// Manually set the auth token (useful in tests or when restored).
+  static void setAuthToken(String? token) {
+    _authToken = token;
   }
 
-  /// Tests connectivity to a MikroTik router through the backend API.
-  /// 
-  /// Guarantees a normalized result map adhering to backend contract:
-  /// Success: {'success': true, 'data': {...}}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
-  static Future<Map<String, dynamic>> testRouterConnection({
-    required String host,
-    required int port,
+  /// Resets client and active in-memory token (useful between test cases).
+  static void resetClient() {
+    client = http.Client();
+    _authToken = null;
+  }
+
+  /// Builds standard request headers with Authorization Bearer token injected if present.
+  static Map<String, String> _buildHeaders({bool isJson = false}) {
+    final headers = <String, String>{
+      'Accept': 'application/json',
+    };
+    if (isJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+    if (_authToken != null && _authToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_authToken';
+    }
+    return headers;
+  }
+
+  /// Loads the saved JWT token from SharedPreferences if available.
+  static Future<String?> loadSavedToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString(tokenStorageKey);
+      if (token != null && token.isNotEmpty) {
+        _authToken = token;
+        return token;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Clears the active authentication token and removes it from persistent storage.
+  static Future<void> logout() async {
+    _authToken = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(tokenStorageKey);
+    } catch (_) {}
+  }
+
+  /// Authenticates with the backend via username and password,
+  /// stores the JWT token in memory and SharedPreferences.
+  static Future<Map<String, dynamic>> login({
     required String username,
     required String password,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/v1/routers/test-connection');
+    final uri = Uri.parse('$baseUrl/api/v1/auth/login');
     final payload = jsonEncode({
-      'host': host,
-      'port': port,
-      'username': username,
+      'username': username.trim(),
       'password': password,
     });
 
@@ -59,8 +105,101 @@ class ApiClient {
         utf8.decode(response.bodyBytes),
       ) as Map<String, dynamic>;
 
+      if (response.statusCode == 200 && body['success'] == true) {
+        final data = body['data'] as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null && token.isNotEmpty) {
+          _authToken = token;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(tokenStorageKey, token);
+          } catch (_) {}
+        }
+        return {
+          'success': true,
+          'data': data,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'بيانات الدخول غير صحيحة',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل تسجيل الدخول (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage':
+            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء تسجيل الدخول: $e',
+      };
+    }
+  }
+
+  /// Tests connectivity to a MikroTik router through the backend API.
+  static Future<Map<String, dynamic>> testRouterConnection({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/test-connection');
+    final payload = jsonEncode({
+      'host': host,
+      'port': port,
+      'username': username,
+      'password': password,
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: payload,
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
       if (response.statusCode == 200) {
         return body;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
       } else if (response.statusCode == 422 || response.statusCode == 400) {
         return body;
       } else {
@@ -101,19 +240,13 @@ class ApiClient {
   }
 
   /// Fetches all registered routers for the current tenant from the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': `List<RouterModel>`}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> getRouters() async {
     final uri = Uri.parse('$baseUrl/api/v1/routers');
 
     try {
       final response = await client.get(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -128,6 +261,13 @@ class ApiClient {
         return {
           'success': true,
           'data': routers,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else {
         return {
@@ -167,10 +307,6 @@ class ApiClient {
   }
 
   /// Registers and provisions a new router entity in the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': RouterModel}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> createRouter({
     required String name,
     required String host,
@@ -191,10 +327,7 @@ class ApiClient {
       final response = await client
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
+            headers: _buildHeaders(isJson: true),
             body: payload,
           )
           .timeout(timeoutDuration);
@@ -209,6 +342,13 @@ class ApiClient {
         return {
           'success': true,
           'data': RouterModel.fromJson(routerData),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 409) {
         return {
@@ -254,19 +394,13 @@ class ApiClient {
   }
 
   /// Deletes a router by its ID from the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'message': '...'}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> deleteRouter(String id) async {
     final uri = Uri.parse('$baseUrl/api/v1/routers/$id');
 
     try {
       final response = await client.delete(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -277,6 +411,13 @@ class ApiClient {
         return {
           'success': true,
           'message': body['message'] ?? 'تم حذف الراوتر بنجاح',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 404) {
         return {
@@ -322,19 +463,13 @@ class ApiClient {
   }
 
   /// Fetches all packages for the current tenant from the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': `List<PackageModel>`}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> getPackages() async {
     final uri = Uri.parse('$baseUrl/api/v1/packages');
 
     try {
       final response = await client.get(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -349,6 +484,13 @@ class ApiClient {
         return {
           'success': true,
           'data': packages,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else {
         return {
@@ -388,10 +530,6 @@ class ApiClient {
   }
 
   /// Creates a new internet package in the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': PackageModel}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> createPackage({
     required String name,
     required String code,
@@ -425,10 +563,7 @@ class ApiClient {
       final response = await client
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
+            headers: _buildHeaders(isJson: true),
             body: payload,
           )
           .timeout(timeoutDuration);
@@ -443,6 +578,13 @@ class ApiClient {
         return {
           'success': true,
           'data': PackageModel.fromJson(pkgData),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 409) {
         return {
@@ -495,19 +637,13 @@ class ApiClient {
   }
 
   /// Deletes a package by its ID from the backend.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'message': '...'}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> deletePackage(String id) async {
     final uri = Uri.parse('$baseUrl/api/v1/packages/$id');
 
     try {
       final response = await client.delete(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -518,6 +654,13 @@ class ApiClient {
         return {
           'success': true,
           'message': body['message'] ?? 'تم حذف الباقة بنجاح',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 404) {
         return {
@@ -563,17 +706,6 @@ class ApiClient {
   }
 
   /// Generates a new batch of hotspot cards associated with an internet package.
-  ///
-  /// Parameters:
-  /// - [packageId]: Required UUID of the package.
-  /// - [quantity]: Number of cards to generate (1 to 1000).
-  /// - [prefix]: Optional alphanumeric prefix for generated usernames.
-  /// - [userLength]: Optional length of username random suffix (default 6).
-  /// - [passwordLength]: Optional length of PIN / password (default 4).
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': {'batch': CardBatchModel, 'cards': `List<CardModel>`}}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> generateCardBatch({
     required String packageId,
     required int quantity,
@@ -600,10 +732,7 @@ class ApiClient {
       final response = await client
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
+            headers: _buildHeaders(isJson: true),
             body: jsonEncode(payloadMap),
           )
           .timeout(const Duration(seconds: 15));
@@ -627,6 +756,13 @@ class ApiClient {
             'batch': batch,
             'cards': cards,
           },
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 404) {
         return {
@@ -685,10 +821,6 @@ class ApiClient {
   }
 
   /// Retrieves hotspot cards with optional filtering by status and batchId.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': `List<CardModel>`}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> getCards({
     String? status,
     String? batchId,
@@ -708,9 +840,7 @@ class ApiClient {
     try {
       final response = await client.get(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -726,6 +856,13 @@ class ApiClient {
         return {
           'success': true,
           'data': cards,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 400) {
         return {
@@ -772,10 +909,6 @@ class ApiClient {
   }
 
   /// Updates the status of an existing card adhering to CardStateMachine transitions.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': CardModel}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> updateCardStatus({
     required String cardId,
     required String newStatus,
@@ -786,10 +919,7 @@ class ApiClient {
       final response = await client
           .patch(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
+            headers: _buildHeaders(isJson: true),
             body: jsonEncode({'newStatus': newStatus}),
           )
           .timeout(timeoutDuration);
@@ -802,6 +932,13 @@ class ApiClient {
         return {
           'success': true,
           'data': CardModel.fromJson(body['data'] as Map<String, dynamic>),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
       } else if (response.statusCode == 422) {
         return {
@@ -854,14 +991,6 @@ class ApiClient {
   }
 
   /// Records a sale transaction for one or more available cards.
-  ///
-  /// Parameters:
-  /// - [cardIds]: Required non-empty list of card UUIDs.
-  /// - [paymentMethod]: One of 'CASH', 'BANK_TRANSFER', 'MOBILE_MONEY'.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': `Map<String, dynamic>`}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> createSale({
     required List<String> cardIds,
     required String paymentMethod,
@@ -876,10 +1005,7 @@ class ApiClient {
       final response = await client
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
+            headers: _buildHeaders(isJson: true),
             body: payload,
           )
           .timeout(timeoutDuration);
@@ -891,6 +1017,13 @@ class ApiClient {
       if ((response.statusCode == 200 || response.statusCode == 201) &&
           body['success'] == true) {
         return body;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
       } else if (response.statusCode == 422) {
         return {
           'success': false,
@@ -950,19 +1083,13 @@ class ApiClient {
   }
 
   /// Retrieves the today's aggregated sales total for the tenant.
-  ///
-  /// Returns:
-  /// Success: {'success': true, 'data': {'todayTotal': double, 'totalAmount': double, ...}}
-  /// Failure: {'success': false, 'errorCode': '...', 'errorMessage': '...'}
   static Future<Map<String, dynamic>> getTodaySalesTotal() async {
     final uri = Uri.parse('$baseUrl/api/v1/sales/today-total');
 
     try {
       final response = await client.get(
         uri,
-        headers: {
-          'Accept': 'application/json',
-        },
+        headers: _buildHeaders(),
       ).timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -971,6 +1098,13 @@ class ApiClient {
 
       if (response.statusCode == 200 && body['success'] == true) {
         return body;
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
       } else {
         return {
           'success': false,
@@ -1008,4 +1142,3 @@ class ApiClient {
     }
   }
 }
-

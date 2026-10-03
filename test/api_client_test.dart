@@ -1,16 +1,81 @@
 // ============================================================================
 // Platform: Commercial MikroTik Network & HotSpot Card Management System
 // File: test/api_client_test.dart
-// Integration Test: ApiClient to Fastify Backend API Verification
+// Integration Test: ApiClient to Fastify Backend API Verification with Auth
+// Master Reference: Rule 14 (Security), Rule 19 (Auth), Rule 23 (Errors)
 // ============================================================================
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mikrotik_cards_app/models/package_model.dart';
 import 'package:mikrotik_cards_app/models/router_model.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'dart:io';
 
 void main() {
-  group('ApiClient Live Backend Integration Tests', () {
+  setUpAll(() async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    HttpOverrides.global = null;
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  group('ApiClient Authentication & Session Tests', () {
+    test('login with invalid credentials returns UNAUTHORIZED', () async {
+      final result = await ApiClient.login(
+        username: 'admin',
+        password: 'wrong_password_123',
+      );
+
+      expect(result['success'], isFalse);
+      expect(result['errorCode'], equals('UNAUTHORIZED'));
+      expect(result['errorMessage'], contains('بيانات الدخول غير صحيحة'));
+      expect(ApiClient.authToken, isNull);
+    });
+
+    test('login with valid credentials sets authToken and returns user data', () async {
+      final result = await ApiClient.login(
+        username: 'admin',
+        password: 'E3*NUdX&R==yKrD3',
+      );
+
+      expect(result['success'], isTrue,
+          reason: 'Login failed: ${result['errorMessage']}');
+      expect(result['data'], isNotNull);
+      expect(ApiClient.authToken, isNotNull);
+      expect(ApiClient.isAuthenticated, isTrue);
+
+      final userData = result['data']['user'];
+      expect(userData['username'], equals('admin'));
+    });
+
+    test('loadSavedToken restores token from storage', () async {
+      // SharedPreferences should have the saved token from previous successful login
+      final loadedToken = await ApiClient.loadSavedToken();
+      expect(loadedToken, isNotNull);
+      expect(loadedToken, equals(ApiClient.authToken));
+    });
+
+    test('logout clears in-memory and persistent token', () async {
+      await ApiClient.logout();
+      expect(ApiClient.authToken, isNull);
+      expect(ApiClient.isAuthenticated, isFalse);
+
+      final loaded = await ApiClient.loadSavedToken();
+      expect(loaded, isNull);
+    });
+  });
+
+  group('ApiClient Live Backend Integration Tests (Authenticated)', () {
+    setUpAll(() async {
+      // Re-login to have active token for authenticated API tests
+      final loginResult = await ApiClient.login(
+        username: 'admin',
+        password: 'E3*NUdX&R==yKrD3',
+      );
+      expect(loginResult['success'], isTrue);
+    });
+
     test('testRouterConnection returns success with RouterInfo for valid host', () async {
       final result = await ApiClient.testRouterConnection(
         host: '192.168.88.1',
