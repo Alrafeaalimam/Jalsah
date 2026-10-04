@@ -1,14 +1,16 @@
 // ============================================================================
-// Platform: Commercial MikroTik Network & HotSpot Card Management System
+// Platform: Commercial MikroTik Network & HotSpot Card Management System (Jalsah)
 // File: lib/main.dart
-// Entrypoint: Loads saved JWT token and routes to Dashboard or TempLoginScreen
-// Master Reference: Rule 14 (Security), Rule 19 (Auth)
+// Entrypoint: SplashVideoScreen -> OnboardingScreen -> Auth / Dashboard Routing
+// Master Reference: Rule 14 (Security), Rule 19 (Auth), Rule 20 (Branding)
 // ============================================================================
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'screens/dashboard_screen.dart';
+import 'screens/onboarding_screen.dart';
+import 'screens/splash_video_screen.dart';
 import 'screens/temp_login_screen.dart';
 import 'services/api_client.dart';
 import 'theme/app_colors.dart';
@@ -21,20 +23,37 @@ void main() async {
 
 class MikrotikCardsApp extends StatelessWidget {
   final String? initialToken;
+  final bool showSplash;
+  final bool? hasSeenOnboardingOverride;
 
   const MikrotikCardsApp({
     super.key,
     this.initialToken,
+    this.showSplash = true,
+    this.hasSeenOnboardingOverride,
   });
 
   @override
   Widget build(BuildContext context) {
-    final bool hasValidToken =
-        (initialToken != null && initialToken!.isNotEmpty) ||
-            ApiClient.isAuthenticated;
+    Widget homeScreen;
+    if (showSplash) {
+      homeScreen = const SplashVideoScreen();
+    } else {
+      final bool hasSeenOnboarding = hasSeenOnboardingOverride ?? true;
+      if (!hasSeenOnboarding) {
+        homeScreen = const OnboardingScreen();
+      } else {
+        final bool hasValidToken =
+            (initialToken != null && initialToken!.isNotEmpty) ||
+                ApiClient.isAuthenticated;
+        homeScreen = hasValidToken
+            ? const DashboardScreen()
+            : const TempLoginScreen();
+      }
+    }
 
     return MaterialApp(
-      title: 'MikroTik Cards App',
+      title: 'Jalsah | جلسة',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -47,7 +66,7 @@ class MikrotikCardsApp extends StatelessWidget {
           surface: AppColors.pageBg,
         ),
       ),
-      home: hasValidToken ? const DashboardScreen() : const TempLoginScreen(),
+      home: homeScreen,
     );
   }
 }

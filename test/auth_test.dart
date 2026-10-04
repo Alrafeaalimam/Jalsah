@@ -279,7 +279,7 @@ void main() {
       ApiClient.resetClient();
 
       await tester.pumpWidget(
-        const MikrotikCardsApp(initialToken: null),
+        const MikrotikCardsApp(initialToken: null, showSplash: false),
       );
       await tester.pumpAndSettle();
 
@@ -303,7 +303,8 @@ void main() {
       });
 
       await tester.pumpWidget(
-        const MikrotikCardsApp(initialToken: 'saved_valid_jwt_token'),
+        const MikrotikCardsApp(
+            initialToken: 'saved_valid_jwt_token', showSplash: false),
       );
       await tester.pumpAndSettle();
 

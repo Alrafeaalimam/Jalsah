@@ -41,8 +41,10 @@ dependencies:
   qr_flutter: ^4.1.0
   pdf: ^3.13.1
   printing: ^5.15.1
+  video_player: ^2.14.1
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.4
   flutter_test:
     sdk: flutter
 
@@ -56,6 +58,12 @@ dependency_overrides:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/icon/logo.jpg"
+  min_sdk_android: 21
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
@@ -66,6 +74,13 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/icon/logo.jpg
+    - assets/onboarding/1.jpg
+    - assets/onboarding/2.jpg
+    - assets/onboarding/3.jpg
+    - assets/video/intro.mp4
 
 
 
