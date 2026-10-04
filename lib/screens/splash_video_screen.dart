@@ -1,7 +1,7 @@
 // ============================================================================
 // Platform: Commercial MikroTik Network & HotSpot Card Management System (Jalsah)
 // File: lib/screens/splash_video_screen.dart
-// Screen: Fullscreen Splash Video Screen with Skip Action
+// Screen: Fullscreen Splash Video Screen with Skip Action & Web Autoplay Support
 // Master Reference: Rule 20 (Frontend), Jalsah Branding
 // ============================================================================
 
@@ -72,8 +72,19 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
       _controller!.setLooping(false);
       _controller!.addListener(_videoListener);
 
+      // On Web browsers, unmuted autoplay without user interaction is blocked.
+      // Setting volume to 0.0 allows automatic playback on web and mobile browsers.
+      try {
+        await _controller!.setVolume(0.0);
+      } catch (_) {}
+
       setState(() {});
-      await _controller!.play();
+
+      try {
+        await _controller!.play();
+      } catch (playErr) {
+        debugPrint('Autoplay prevented by browser: $playErr');
+      }
     } catch (e) {
       debugPrint('Splash video initialization failed: $e');
       if (mounted) {
@@ -172,16 +183,51 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
   }
 
   Widget _buildVideoContent() {
-    if (_controller != null && _controller!.value.isInitialized && !_hasInitError) {
+    if (_controller != null &&
+        _controller!.value.isInitialized &&
+        !_hasInitError) {
       final size = _controller!.value.size;
-      return SizedBox.expand(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: size.width > 0 ? size.width : 1280,
-            height: size.height > 0 ? size.height : 720,
-            child: VideoPlayer(_controller!),
-          ),
+      final bool isPlaying = _controller!.value.isPlaying;
+
+      return GestureDetector(
+        onTap: () {
+          if (!_controller!.value.isPlaying) {
+            _controller!.play();
+          }
+          // Unmute on direct user tap
+          try {
+            _controller!.setVolume(1.0);
+          } catch (_) {}
+          setState(() {});
+        },
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox.expand(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: size.width > 0 ? size.width : 1280,
+                  height: size.height > 0 ? size.height : 720,
+                  child: VideoPlayer(_controller!),
+                ),
+              ),
+            ),
+            // Play overlay if browser required user gesture
+            if (!isPlaying && !_hasNavigated)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  size: 48,
+                  color: Colors.white,
+                ),
+              ),
+          ],
         ),
       );
     }
