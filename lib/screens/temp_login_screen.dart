@@ -14,6 +14,7 @@ import '../theme/app_colors.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'dashboard_screen.dart';
+import 'register_screen.dart';
 
 class TempLoginScreen extends StatefulWidget {
   const TempLoginScreen({super.key});
@@ -265,6 +266,42 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
                               ],
                             ),
                     ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Register link
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'ليس لديك حساب؟',
+                        style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const RegisterScreen(),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          'أنشئ حساباً جديداً',
+                          style: GoogleFonts.cairo(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.heroGradientStart,
+                            decoration: TextDecoration.underline,
+                            decorationColor: AppColors.heroGradientStart,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -1574,5 +1574,106 @@ class ApiClient {
       };
     }
   }
+
+  /// Registers a new tenant (network) and initial administrator user.
+  static Future<Map<String, dynamic>> registerTenant({
+    required String networkName,
+    required String adminFullName,
+    required String username,
+    required String email,
+    required String password,
+    String? phone,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/register');
+    final payload = jsonEncode({
+      'networkName': networkName.trim(),
+      'adminFullName': adminFullName.trim(),
+      'username': username.trim(),
+      'email': email.trim(),
+      'password': password,
+      if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: payload,
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 201 && body['success'] == true) {
+        final data = body['data'] as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null && token.isNotEmpty) {
+          setAuthToken(token);
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(tokenStorageKey, token);
+          } catch (_) {}
+        }
+        return {
+          'success': true,
+          'data': data,
+        };
+      } else if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'CONFLICT',
+          'errorMessage': body['errorMessage'] ?? 'البيانات المدخلة مستخدمة بالفعل.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'VALIDATION_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'يرجى التأكد من صحة البيانات المدخلة.',
+          'details': body['details'],
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل إنشاء الحساب (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء إنشاء الحساب.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء إنشاء الحساب: $e',
+      };
+    }
+  }
 }
+
 
