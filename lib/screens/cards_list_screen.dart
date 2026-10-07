@@ -294,7 +294,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
           end: Alignment.bottomLeft,
         ),
         borderRadius: BorderRadius.vertical(
-          bottom: Radius.circular(28),
+          bottom: Radius.circular(24),
         ),
         boxShadow: [
           BoxShadow(
@@ -307,87 +307,95 @@ class _CardsListScreenState extends State<CardsListScreen> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 22),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Navigation & Title Row
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      // Back Button
-                      InkWell(
-                        onTap: () => Navigator.of(context).pop(),
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.25),
-                              width: 1.2,
+                  Expanded(
+                    child: Row(
+                      children: [
+                        // Back Button
+                        InkWell(
+                          onTap: () => Navigator.of(context).pop(),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.25),
+                                width: 1.2,
+                              ),
                             ),
-                          ),
-                          child: const Icon(
-                            Icons.arrow_forward_ios_rounded,
-                            size: 16,
-                            color: Colors.white,
+                            child: const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 16,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                'كروت الهوتسبوت',
-                                style: GoogleFonts.cairo(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                  letterSpacing: 0.2,
-                                ),
-                              ),
-                              if (widget.initialBatchId != null) ...[
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.accentYellow,
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    'دفعة محددة',
+                              Row(
+                                children: [
+                                  Text(
+                                    'كروت الهوتسبوت',
                                     style: GoogleFonts.cairo(
-                                      fontSize: 10.5,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.w800,
-                                      color: AppColors.textDark,
+                                      color: Colors.white,
+                                      letterSpacing: 0.2,
                                     ),
                                   ),
+                                  if (widget.initialBatchId != null) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.accentYellow,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'دفعة محددة',
+                                        style: GoogleFonts.cairo(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              Text(
+                                'إدارة ومتابعة كروت شبكة المايكروتك',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.cairo(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white.withValues(alpha: 0.85),
                                 ),
-                              ],
+                              ),
                             ],
                           ),
-                          Text(
-                            'إدارة ومتابعة كروت شبكة المايكروتك',
-                            style: GoogleFonts.cairo(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white.withValues(alpha: 0.85),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
 
                   // Quick Action: Generate Cards
                   InkWell(
@@ -439,7 +447,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
 
               // Stat Cards Row
               Row(

@@ -146,6 +146,19 @@ void main() {
         (WidgetTester tester) async {
       int routerRequestCount = 0;
       ApiClient.client = MockClient((request) async {
+        if (request.url.path.contains('subscription')) {
+          return utf8Response({
+            'success': true,
+            'data': {
+              'subscriptionStatus': 'TRIAL',
+              'trialEndsAt': '2026-10-14T00:00:00.000Z',
+              'daysRemaining': 7,
+              'planName': null,
+              'currentRoutersCount': 0,
+              'maxRoutersLimit': 5,
+            },
+          }, 200);
+        }
         if (request.url.path.contains('sales')) {
           return utf8Response({
             'success': true,

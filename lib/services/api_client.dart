@@ -17,6 +17,7 @@ import '../models/package_model.dart';
 import '../models/router_model.dart';
 import '../models/sale_model.dart';
 import '../models/staff_user_model.dart';
+import '../models/subscription_status_model.dart';
 
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
@@ -1500,4 +1501,78 @@ class ApiClient {
       };
     }
   }
+
+  /// Fetches tenant subscription status, trial remaining days, and usage limits.
+  static Future<Map<String, dynamic>> getSubscriptionStatus() async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/status');
+
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: _buildHeaders(),
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 200 &&
+          body['success'] == true &&
+          body['data'] is Map<String, dynamic>) {
+        return {
+          'success': true,
+          'data': SubscriptionStatusModel.fromJson(
+            body['data'] as Map<String, dynamic>,
+          ),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              'فشل جلب حالة الاشتراك (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء جلب حالة الاشتراك.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق (ليست JSON صالحة).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب حالة الاشتراك: $e',
+      };
+    }
+  }
 }
+

@@ -6,10 +6,12 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/router_model.dart';
+import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
 import '../widgets/count_up_text.dart';
@@ -43,6 +45,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _todaySalesTotal = 0.0;
   bool _isLoadingSales = true;
   bool _isRedirectingToLogin = false;
+  SubscriptionStatusModel? _subscriptionStatus;
 
   void _handleUnauthorized() {
     if (!mounted || _isRedirectingToLogin) return;
@@ -61,6 +64,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _loadRouters();
     _loadTodaySales();
+    _loadSubscriptionStatus();
+  }
+
+  Future<void> _loadSubscriptionStatus() async {
+    try {
+      final result = await ApiClient.getSubscriptionStatus();
+
+      if (!mounted) return;
+
+      if (result['errorCode'] == 'UNAUTHORIZED') {
+        _handleUnauthorized();
+        return;
+      }
+
+      if (result['success'] == true &&
+          result['data'] is SubscriptionStatusModel) {
+        setState(() {
+          _subscriptionStatus = result['data'] as SubscriptionStatusModel;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadTodaySales() async {
@@ -113,6 +137,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (result['errorCode'] == 'UNAUTHORIZED') {
       _handleUnauthorized();
+      return;
+    }
+
+    if (result['errorCode'] == 'SUBSCRIPTION_EXPIRED' ||
+        result['errorCode'] == 'SUBSCRIPTION_SUSPENDED') {
+      setState(() {
+        _subscriptionStatus = const SubscriptionStatusModel(
+          subscriptionStatus: 'EXPIRED',
+          daysRemaining: 0,
+          currentRoutersCount: 0,
+          maxRoutersLimit: 0,
+        );
+        _isLoading = false;
+      });
       return;
     }
 
@@ -345,6 +383,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_subscriptionStatus != null &&
+        (_subscriptionStatus!.isExpired || _subscriptionStatus!.isSuspended)) {
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          backgroundColor: AppColors.pageBg,
+          body: _buildExpiredSubscriptionView(),
+        ),
+      );
+    }
+
     final int onlineCount = _routers.where((r) => r.isOnline).length;
     final int totalCount = _routers.length;
 
@@ -357,6 +406,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // Top Hero Banner
             _buildTopBanner(context, onlineCount: onlineCount, totalCount: totalCount),
 
+            // Subscription Alert Strip (TRIAL only)
+            if (_subscriptionStatus != null && _subscriptionStatus!.isTrial)
+              _buildTrialBannerStrip(_subscriptionStatus!),
+
             // Router List Header & List Content with Pull-To-Refresh
             Expanded(
               child: RefreshIndicator(
@@ -364,6 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   await Future.wait([
                     _loadRouters(),
                     _loadTodaySales(),
+                    _loadSubscriptionStatus(),
                   ]);
                 },
                 color: AppColors.heroGradientStart,
@@ -675,6 +729,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildBannerNavButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.16),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.22),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 15),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTopBanner(
     BuildContext context, {
     required int onlineCount,
@@ -691,7 +789,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           end: Alignment.bottomLeft,
         ),
         borderRadius: BorderRadius.vertical(
-          bottom: Radius.circular(28),
+          bottom: Radius.circular(24),
         ),
         boxShadow: [
           BoxShadow(
@@ -704,11 +802,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 16, 22, 24),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // User Greeting Row
+              // 1. User Greeting Row
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -719,18 +818,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Text(
                           'مساء الخير 👋',
                           style: GoogleFonts.cairo(
-                            fontSize: 14,
+                            fontSize: 13,
                             fontWeight: FontWeight.w500,
                             color: Colors.white.withValues(alpha: 0.85),
                           ),
                         ),
-                        const SizedBox(height: 2),
                         Text(
                           widget.userName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.cairo(
-                            fontSize: 20,
+                            fontSize: 18,
                             fontWeight: FontWeight.w800,
                             color: Colors.white,
                             letterSpacing: 0.2,
@@ -739,54 +837,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  // Packages Navigation Button
-                  InkWell(
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const PackagesScreen(),
-                        ),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.25),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.inventory_2_outlined,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'الباقات',
-                            style: GoogleFonts.cairo(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.22),
+                        width: 1,
                       ),
                     ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: AppColors.statusOnline,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'نظام متصل',
+                          style: GoogleFonts.cairo(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  // Cards Navigation Button
-                  InkWell(
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // 2. Action Buttons Row (الموظفون / الكروت / الباقات / الإشعارات)
+              Row(
+                children: [
+                  if (ApiClient.isAdmin) ...[
+                    _buildBannerNavButton(
+                      icon: Icons.group_outlined,
+                      label: 'الموظفون',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const StaffScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  _buildBannerNavButton(
+                    icon: Icons.credit_card_rounded,
+                    label: 'الكروت',
                     onTap: () async {
                       await Navigator.of(context).push(
                         MaterialPageRoute(
@@ -795,123 +902,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       );
                       _loadTodaySales();
                     },
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.25),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.credit_card_rounded,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'الكروت',
-                            style: GoogleFonts.cairo(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
-                  if (ApiClient.isAdmin) ...[
-                    const SizedBox(width: 8),
-                    // Staff Navigation Button (Only visible for TENANT_ADMIN or SUPER_ADMIN)
-                    InkWell(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) => const StaffScreen(),
-                          ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
+                  const SizedBox(width: 6),
+                  _buildBannerNavButton(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'الباقات',
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const PackagesScreen(),
                         ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            width: 1.2,
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 6),
+                  _buildBannerNavButton(
+                    icon: Icons.notifications_none_rounded,
+                    label: 'الإشعارات',
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: AppColors.heroGradientStart,
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.group_outlined,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'الموظفون',
-                              style: GoogleFonts.cairo(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
+                          content: Row(
+                            children: [
+                              const Icon(
+                                Icons.notifications_active_outlined,
                                 color: Colors.white,
+                                size: 20,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 10),
+                              Text(
+                                'لا توجد تنبيهات جديدة في النظام',
+                                style: GoogleFonts.cairo(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 8),
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        width: 1.5,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.notifications_none_rounded,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+                      );
+                    },
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
 
-              // Two Stats Cards (Real Device Status + Demo Sales)
+              // 3. Two Stats Cards (Real Device Status + Today's Sales)
               Row(
                 children: [
                   // Stat Card 1: Online Status (REAL DATA)
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 14,
+                        horizontal: 12,
+                        vertical: 10,
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.22),
                           width: 1,
@@ -939,7 +994,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 Text(
                                   'حالة الأجهزة',
                                   style: GoogleFonts.cairo(
-                                    fontSize: 12,
+                                    fontSize: 11.5,
                                     fontWeight: FontWeight.w600,
                                     color: Colors.white.withValues(alpha: 0.9),
                                   ),
@@ -947,7 +1002,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerRight,
@@ -958,7 +1013,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 Text(
                                   'Online ',
                                   style: GoogleFonts.cairo(
-                                    fontSize: 14,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w700,
                                     color: AppColors.accentYellow,
                                   ),
@@ -967,7 +1022,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   targetValue: onlineCount,
                                   suffix: '/$totalCount',
                                   style: GoogleFonts.cairo(
-                                    fontSize: 20,
+                                    fontSize: 18,
                                     fontWeight: FontWeight.w800,
                                     color: Colors.white,
                                   ),
@@ -979,7 +1034,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
 
                   // Stat Card 2: مبيعات اليوم (قابل للنقر لفتح تقارير المبيعات)
                   Expanded(
@@ -992,15 +1047,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                         _loadTodaySales();
                       },
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(16),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 14,
+                          horizontal: 12,
+                          vertical: 10,
                         ),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: Colors.white.withValues(alpha: 0.22),
                             width: 1,
@@ -1016,14 +1071,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   children: [
                                     Icon(
                                       Icons.payments_outlined,
-                                      size: 14,
+                                      size: 13,
                                       color: Colors.white.withValues(alpha: 0.9),
                                     ),
                                     const SizedBox(width: 5),
                                     Text(
                                       'مبيعات اليوم',
                                       style: GoogleFonts.cairo(
-                                        fontSize: 12,
+                                        fontSize: 11.5,
                                         fontWeight: FontWeight.w600,
                                         color: Colors.white.withValues(alpha: 0.9),
                                       ),
@@ -1032,20 +1087,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 ),
                                 Icon(
                                   Icons.arrow_back_ios_new_rounded,
-                                  size: 11,
+                                  size: 10,
                                   color: Colors.white.withValues(alpha: 0.6),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 6),
                             if (_isLoadingSales)
                               const SizedBox(
-                                height: 30,
+                                height: 26,
                                 child: Align(
                                   alignment: Alignment.centerRight,
                                   child: SizedBox(
-                                    width: 18,
-                                    height: 18,
+                                    width: 16,
+                                    height: 16,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                       valueColor: AlwaysStoppedAnimation<Color>(
@@ -1070,7 +1125,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     return '$formatted جنيه سوداني';
                                   },
                                   style: GoogleFonts.cairo(
-                                    fontSize: 20,
+                                    fontSize: 18,
                                     fontWeight: FontWeight.w800,
                                     color: AppColors.accentYellow,
                                   ),
@@ -1082,6 +1137,255 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrialBannerStrip(SubscriptionStatusModel status) {
+    final bool isCritical = status.daysRemaining <= 2;
+    final Color alertBg = isCritical
+        ? const Color(0xFFEF4444).withValues(alpha: 0.12)
+        : AppColors.heroGradientStart.withValues(alpha: 0.10);
+    final Color alertBorder = isCritical
+        ? const Color(0xFFEF4444).withValues(alpha: 0.40)
+        : AppColors.heroGradientStart.withValues(alpha: 0.28);
+    final Color alertTextColor = isCritical
+        ? const Color(0xFFEF4444)
+        : AppColors.heroGradientStart;
+    final IconData alertIcon = isCritical
+        ? Icons.warning_amber_rounded
+        : Icons.timer_outlined;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: alertBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: alertBorder, width: 1),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            alertIcon,
+            size: 18,
+            color: alertTextColor,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'باقي ${status.daysRemaining} أيام من فترتك التجريبية',
+              style: GoogleFonts.cairo(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: alertTextColor,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: alertTextColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'فترة تجريبية',
+              style: GoogleFonts.cairo(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: alertTextColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExpiredSubscriptionView() {
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 90,
+                height: 90,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.pageBg,
+                  boxShadow: [
+                    const BoxShadow(
+                      color: AppColors.shadowLight,
+                      offset: Offset(-5, -5),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                    BoxShadow(
+                      color: AppColors.shadowDark.withValues(alpha: 0.7),
+                      offset: const Offset(5, 5),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.lock_clock_rounded,
+                    size: 46,
+                    color: AppColors.statusOffline,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                'انتهت فترتك التجريبية',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.cairo(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'لقد انتهت فترة الـ 7 أيام التجريبية لنظام إدارة الشبكات والكروت. للاستمرار في استخدام النظام وتفعيل اشتراكك، يرجى التواصل مع فريق الدعم.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.cairo(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textMuted,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 32),
+              PressableNeumorphicCard(
+                onTap: () {
+                  Clipboard.setData(const ClipboardData(text: '+249900000000'));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: AppColors.statusOnline,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      content: Row(
+                        children: [
+                          const Icon(Icons.check_circle_rounded, color: Colors.white),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'تم نسخ رقم الدعم: +249 90 000 0000',
+                              style: GoogleFonts.cairo(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(18),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.statusOnline.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.support_agent_rounded,
+                        color: AppColors.statusOnline,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'تواصل للاشتراك (SOFT ZONE)',
+                            style: GoogleFonts.cairo(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '+249 90 000 0000 (هاتف / واتساب)',
+                            textDirection: TextDirection.ltr,
+                            style: GoogleFonts.cairo(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.content_copy_rounded,
+                      size: 18,
+                      color: AppColors.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await _loadSubscriptionStatus();
+                  if (mounted && _subscriptionStatus != null && !_subscriptionStatus!.isExpired) {
+                    _loadRouters();
+                    _loadTodaySales();
+                  }
+                },
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: Text(
+                  'التحقق من حالة الاشتراك',
+                  style: GoogleFonts.cairo(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.heroGradientStart,
+                  side: const BorderSide(color: AppColors.heroGradientStart, width: 1.5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () async {
+                  await ApiClient.logout();
+                  if (!mounted) return;
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const TempLoginScreen()),
+                    (route) => false,
+                  );
+                },
+                icon: const Icon(Icons.logout_rounded, size: 16),
+                label: Text(
+                  'تسجيل الخروج',
+                  style: GoogleFonts.cairo(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted,
+                  ),
+                ),
               ),
             ],
           ),

@@ -42,6 +42,7 @@ dependencies:
   pdf: ^3.13.1
   printing: ^5.15.1
   video_player: ^2.14.1
+  video_player_web: ^2.4.0
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4
@@ -81,6 +82,7 @@ flutter:
     - assets/onboarding/2.jpg
     - assets/onboarding/3.jpg
     - assets/video/intro.mp4
+    - assets/fonts/
 
 
 

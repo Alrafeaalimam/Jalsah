@@ -415,7 +415,7 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
           end: Alignment.bottomLeft,
         ),
         borderRadius: BorderRadius.vertical(
-          bottom: Radius.circular(28),
+          bottom: Radius.circular(24),
         ),
         boxShadow: [
           BoxShadow(
@@ -428,8 +428,9 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Navigation & Title Row
@@ -457,38 +458,42 @@ class _SalesReportScreenState extends State<SalesReportScreen> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'تقارير المبيعات',
-                        style: GoogleFonts.cairo(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: 0.2,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'تقارير المبيعات',
+                          style: GoogleFonts.cairo(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.2,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'متابعة المعاملات والإيرادات المحققة',
-                        style: GoogleFonts.cairo(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.white.withValues(alpha: 0.85),
+                        Text(
+                          'متابعة المعاملات والإيرادات المحققة',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.cairo(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
 
               // Aggregated Sales Total Stat Card (Matching Dashboard Style)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 16,
+                  horizontal: 14,
+                  vertical: 12,
                 ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.14),

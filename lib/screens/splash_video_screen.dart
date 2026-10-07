@@ -13,6 +13,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
+import '../utils/web_video_init.dart';
 import 'dashboard_screen.dart';
 import 'onboarding_screen.dart';
 import 'temp_login_screen.dart';
@@ -59,41 +60,60 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
   }
 
   Future<void> _initializeVideo() async {
+    // ignore: avoid_print
+    print('SPLASH_INIT: Starting video controller initialization');
     try {
+      ensureWebVideoInitialized();
       if (widget.controllerOverride != null) {
         _controller = widget.controllerOverride!;
       } else {
-        _controller = VideoPlayerController.asset('assets/video/intro.mp4');
+        _controller = VideoPlayerController.asset(
+          'assets/video/intro.mp4',
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
       }
 
+      // Pre-set volume to 0.0 so web element initializes muted for autoplay policy
+      try {
+        await _controller!.setVolume(0.0);
+      } catch (_) {}
+
+      // ignore: avoid_print
+      print('SPLASH_INIT: Controller created, calling initialize()');
       await _controller!.initialize();
+      // ignore: avoid_print
+      print('SPLASH_INIT: initialize() succeeded! duration=${_controller!.value.duration}, size=${_controller!.value.size}');
       if (!mounted) return;
 
       _controller!.setLooping(false);
       _controller!.addListener(_videoListener);
 
-      // On Web browsers, unmuted autoplay without user interaction is blocked.
-      // Setting volume to 0.0 allows automatic playback on web and mobile browsers.
       try {
         await _controller!.setVolume(0.0);
-      } catch (_) {}
+      } catch (volErr) {
+        // ignore: avoid_print
+        print('SPLASH_INIT: setVolume failed: $volErr');
+      }
 
       setState(() {});
 
       try {
         await _controller!.play();
+        // ignore: avoid_print
+        print('SPLASH_INIT: play() called successfully');
       } catch (playErr) {
-        debugPrint('Autoplay prevented by browser: $playErr');
+        // ignore: avoid_print
+        print('SPLASH_INIT: Autoplay prevented by browser: $playErr');
       }
-    } catch (e) {
-      debugPrint('Splash video initialization failed: $e');
+    } catch (e, stack) {
+      // ignore: avoid_print
+      print('SPLASH_INIT_FAILED: error=$e\nstack=$stack');
       if (mounted) {
         setState(() {
           _hasInitError = true;
           _canSkip = true;
         });
       }
-      // Fallback timer to prevent getting stuck in environments where video playback is unsupported
       _fallbackTimer = Timer(const Duration(seconds: 3), () {
         if (mounted && !_hasNavigated) {
           _navigateToNextScreen();
