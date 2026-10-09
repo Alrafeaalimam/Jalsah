@@ -7,6 +7,7 @@
 class SubscriptionStatusModel {
   final String subscriptionStatus;
   final DateTime? trialEndsAt;
+  final DateTime? subscriptionEndsAt;
   final int daysRemaining;
   final String? planName;
   final int currentRoutersCount;
@@ -15,6 +16,7 @@ class SubscriptionStatusModel {
   const SubscriptionStatusModel({
     required this.subscriptionStatus,
     this.trialEndsAt,
+    this.subscriptionEndsAt,
     required this.daysRemaining,
     this.planName,
     required this.currentRoutersCount,
@@ -34,11 +36,17 @@ class SubscriptionStatusModel {
     if (json['trialEndsAt'] != null) {
       parsedTrialEndsAt = DateTime.tryParse(json['trialEndsAt'].toString());
     }
+    DateTime? parsedSubscriptionEndsAt;
+    if (json['subscriptionEndsAt'] != null) {
+      parsedSubscriptionEndsAt =
+          DateTime.tryParse(json['subscriptionEndsAt'].toString());
+    }
 
     return SubscriptionStatusModel(
       subscriptionStatus:
           (json['subscriptionStatus'] as String? ?? 'TRIAL').toUpperCase(),
       trialEndsAt: parsedTrialEndsAt,
+      subscriptionEndsAt: parsedSubscriptionEndsAt,
       daysRemaining: (json['daysRemaining'] as num?)?.toInt() ?? 0,
       planName: json['planName'] as String?,
       currentRoutersCount: (json['currentRoutersCount'] as num?)?.toInt() ?? 0,
@@ -50,6 +58,8 @@ class SubscriptionStatusModel {
     return {
       'subscriptionStatus': subscriptionStatus,
       if (trialEndsAt != null) 'trialEndsAt': trialEndsAt!.toIso8601String(),
+      if (subscriptionEndsAt != null)
+        'subscriptionEndsAt': subscriptionEndsAt!.toIso8601String(),
       'daysRemaining': daysRemaining,
       if (planName != null) 'planName': planName,
       'currentRoutersCount': currentRoutersCount,

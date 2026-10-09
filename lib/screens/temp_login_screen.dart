@@ -15,6 +15,7 @@ import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'dashboard_screen.dart';
 import 'register_screen.dart';
+import 'admin/super_admin_dashboard.dart';
 
 class TempLoginScreen extends StatefulWidget {
   const TempLoginScreen({super.key});
@@ -81,13 +82,23 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => DashboardScreen(
-            userName: fullName,
+      if (tokenRole == 'SUPER_ADMIN') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => SuperAdminDashboardScreen(
+              adminName: fullName,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => DashboardScreen(
+              userName: fullName,
+            ),
+          ),
+        );
+      }
     } else {
       setState(() {
         _isLoading = false;

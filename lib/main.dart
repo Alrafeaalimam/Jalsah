@@ -12,6 +12,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/splash_video_screen.dart';
 import 'screens/temp_login_screen.dart';
+import 'screens/admin/super_admin_dashboard.dart';
 import 'services/api_client.dart';
 import 'theme/app_colors.dart';
 
@@ -46,9 +47,13 @@ class MikrotikCardsApp extends StatelessWidget {
         final bool hasValidToken =
             (initialToken != null && initialToken!.isNotEmpty) ||
                 ApiClient.isAuthenticated;
-        homeScreen = hasValidToken
-            ? const DashboardScreen()
-            : const TempLoginScreen();
+        if (hasValidToken && ApiClient.isSuperAdmin) {
+          homeScreen = const SuperAdminDashboardScreen();
+        } else if (hasValidToken) {
+          homeScreen = const DashboardScreen();
+        } else {
+          homeScreen = const TempLoginScreen();
+        }
       }
     }
 

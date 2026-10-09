@@ -18,6 +18,8 @@ import '../models/router_model.dart';
 import '../models/sale_model.dart';
 import '../models/staff_user_model.dart';
 import '../models/subscription_status_model.dart';
+import '../models/admin_tenant_model.dart';
+import '../models/license_code_model.dart';
 
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
@@ -51,6 +53,11 @@ class ApiClient {
   static bool get isAdmin {
     final role = getUserRole();
     return role == 'TENANT_ADMIN' || role == 'SUPER_ADMIN';
+  }
+
+  /// Whether the authenticated user is the platform super administrator (SUPER_ADMIN).
+  static bool get isSuperAdmin {
+    return getUserRole() == 'SUPER_ADMIN';
   }
 
   /// Manually set the auth token (useful in tests or when restored).
@@ -1671,6 +1678,322 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء إنشاء الحساب: $e',
+      };
+    }
+  }
+
+  // ==========================================================================
+  // SUBSCRIPTION REDEEM & SUPER ADMIN API METHODS
+  // ==========================================================================
+
+  /// Redeems a valid license code to activate or extend subscription.
+  /// Available to TENANT_ADMIN and SUPER_ADMIN.
+  static Future<Map<String, dynamic>> redeemLicenseCode(String code) async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/redeem');
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({'code': code.trim().toUpperCase()}),
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['data']?['message'] ?? 'تم تفعيل كود الترخيص بنجاح!',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'CODE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? 'كود الترخيص غير موجود أو غير صالح.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'BAD_REQUEST',
+          'errorMessage': body['errorMessage'] ?? 'كود الترخيص غير صالح أو مستخدم مسبقاً.',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'ليس لديك الصلاحيات الكافية لتفعيل كود الترخيص.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'فشل تفعيل كود الترخيص (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء تفعيل كود الترخيص.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } on FormatException {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_RESPONSE',
+        'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء تفعيل كود الترخيص: $e',
+      };
+    }
+  }
+
+  /// Lists all registered companies/tenants in the system (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> getAdminTenants() async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants');
+
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: _buildHeaders(),
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final tenants = list
+            .map((item) => AdminTenantModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+        return {
+          'success': true,
+          'data': tenants,
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'هذا القسم مخصص لمدير المنصة العام (SUPER_ADMIN) فقط.',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'فشل جلب قائمة الشركات (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء جلب الشركات.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ أثناء جلب الشركات: $e',
+      };
+    }
+  }
+
+  /// Lists all generated license codes in the system (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> getAdminLicenseCodes() async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/license-codes');
+
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: _buildHeaders(),
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final codes = list
+            .map((item) => LicenseCodeModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+        return {
+          'success': true,
+          'data': codes,
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'هذا القسم مخصص لمدير المنصة العام (SUPER_ADMIN) فقط.',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'فشل جلب قائمة أكواد الترخيص (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء جلب أكواد الترخيص.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ أثناء جلب أكواد الترخيص: $e',
+      };
+    }
+  }
+
+  /// Generates a new license code (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> generateLicenseCode({
+    required String planName,
+    required int durationDays,
+    required int maxRoutersLimit,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/license-codes');
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({
+              'planName': planName.trim(),
+              'durationDays': durationDays,
+              'maxRoutersLimit': maxRoutersLimit,
+            }),
+          )
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! Map<String, dynamic>) {
+        return {
+          'success': false,
+          'errorCode': 'INVALID_RESPONSE',
+          'errorMessage': 'استجابة الخادم بتنسيق غير متوافق.',
+        };
+      }
+      final Map<String, dynamic> body = decoded;
+
+      if (response.statusCode == 201 &&
+          body['success'] == true &&
+          body['data'] is Map<String, dynamic>) {
+        return {
+          'success': true,
+          'data': LicenseCodeModel.fromJson(body['data'] as Map<String, dynamic>),
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': 'FORBIDDEN',
+          'errorMessage': body['errorMessage'] ?? 'هذا القسم مخصص لمدير المنصة العام (SUPER_ADMIN) فقط.',
+        };
+      } else if (response.statusCode == 400) {
+        return {
+          'success': false,
+          'errorCode': 'VALIDATION_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'بيانات كود الترخيص غير صالحة.',
+          'details': body['details'],
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'فشل توليد كود الترخيص (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم أثناء توليد كود الترخيص.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ أثناء توليد كود الترخيص: $e',
       };
     }
   }

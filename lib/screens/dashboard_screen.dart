@@ -15,6 +15,7 @@ import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
 import '../widgets/count_up_text.dart';
+import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import '../widgets/pulsing_dot.dart';
 import 'add_router_screen.dart';
@@ -874,10 +875,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 12),
 
-              // 2. Action Buttons Row (الموظفون / الكروت / الباقات / الإشعارات)
+              // 2. Action Buttons Row (الموظفون / الترخيص / الكروت / الباقات / الإشعارات)
               Row(
                 children: [
                   if (ApiClient.isAdmin) ...[
+                    _buildBannerNavButton(
+                      icon: Icons.vpn_key_outlined,
+                      label: 'الترخيص',
+                      onTap: _showRedeemLicenseDialog,
+                    ),
+                    const SizedBox(width: 6),
                     _buildBannerNavButton(
                       icon: Icons.group_outlined,
                       label: 'الموظفون',
@@ -1201,8 +1208,254 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: _showRedeemLicenseDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.heroGradientStart,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.vpn_key_rounded, size: 12, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    'تفعيل كود',
+                    style: GoogleFonts.cairo(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  void _showRedeemLicenseDialog() {
+    final codeController = TextEditingController();
+    bool isSubmitting = false;
+    String? dialogError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: AlertDialog(
+                backgroundColor: AppColors.pageBg,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                title: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.heroGradientStart.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.vpn_key_rounded,
+                        color: AppColors.heroGradientStart,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'تفعيل كود ترخيص',
+                        style: GoogleFonts.cairo(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'أدخل كود الترخيص المكون من 12 خانة (مثال: XXXX-XXXX-XXXX) لتفعيل أو تمديد اشتراك شبكتك:',
+                        style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          color: AppColors.textMuted,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (dialogError != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.statusOffline.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: AppColors.statusOffline.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.error_outline_rounded,
+                                color: AppColors.statusOffline,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  dialogError!,
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 12.5,
+                                    color: AppColors.statusOffline,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                      NeumorphicTextField(
+                        label: 'كود الترخيص (License Code)',
+                        hintText: 'XXXX-XXXX-XXXX',
+                        controller: codeController,
+                        prefixIcon: const Icon(
+                          Icons.pin_rounded,
+                          color: AppColors.textMuted,
+                          size: 20,
+                        ),
+                        onChanged: (val) {
+                          if (dialogError != null) {
+                            setDialogState(() => dialogError = null);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSubmitting
+                        ? null
+                        : () => Navigator.of(ctx).pop(),
+                    child: Text(
+                      'إلغاء',
+                      style: GoogleFonts.cairo(
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.heroGradientStart,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                    ),
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            final code = codeController.text.trim();
+                            if (code.isEmpty) {
+                              setDialogState(
+                                () => dialogError = 'يرجى إدخال كود الترخيص',
+                              );
+                              return;
+                            }
+
+                            setDialogState(() {
+                              isSubmitting = true;
+                              dialogError = null;
+                            });
+
+                            final result =
+                                await ApiClient.redeemLicenseCode(code);
+                            if (!mounted) return;
+
+                            if (result['success'] == true) {
+                              Navigator.of(ctx).pop();
+                              await _loadSubscriptionStatus();
+                              await Future.wait([
+                                _loadRouters(),
+                                _loadTodaySales(),
+                              ]);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: AppColors.statusOnline,
+                                  behavior: SnackBarBehavior.floating,
+                                  duration: const Duration(seconds: 4),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.check_circle_rounded,
+                                          color: Colors.white),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          result['message'] ??
+                                              'تم تفعيل كود الترخيص بنجاح!',
+                                          style: GoogleFonts.cairo(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            } else {
+                              setDialogState(() {
+                                isSubmitting = false;
+                                dialogError = result['errorMessage'] as String? ??
+                                    'تعذر تفعيل كود الترخيص';
+                              });
+                            }
+                          },
+                    child: isSubmitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            'تفعيل الترخيص',
+                            style: GoogleFonts.cairo(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1254,7 +1507,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'لقد انتهت فترة الـ 7 أيام التجريبية لنظام إدارة الشبكات والكروت. للاستمرار في استخدام النظام وتفعيل اشتراكك، يرجى التواصل مع فريق الدعم.',
+                'لقد انتهت فترة الـ 7 أيام التجريبية لنظام إدارة الشبكات والكروت. للاستمرار في استخدام النظام وتفعيل اشتراكك، يمكنك تفعيل كود ترخيص أو التواصل مع فريق الدعم.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.cairo(
                   fontSize: 13.5,
@@ -1264,6 +1517,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               const SizedBox(height: 32),
+
+              // خيار تفعيل كود ترخيص (بديل للتواصل مع الدعم)
+              PressableNeumorphicCard(
+                onTap: _showRedeemLicenseDialog,
+                backgroundColor: AppColors.accentYellow,
+                borderRadius: BorderRadius.circular(18),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.textDark.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.vpn_key_rounded,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'تفعيل كود ترخيص',
+                            style: GoogleFonts.cairo(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'لديك كود ترخيص؟ اضغط هنا لإدخاله وتفعيل حسابك فوراً',
+                            style: GoogleFonts.cairo(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textDark.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 16,
+                      color: AppColors.textDark,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               PressableNeumorphicCard(
                 onTap: () {
                   Clipboard.setData(const ClipboardData(text: '+249900000000'));
