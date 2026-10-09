@@ -15,6 +15,7 @@ import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'dashboard_screen.dart';
 import 'register_screen.dart';
+import 'forgot_password_screen.dart';
 import 'admin/super_admin_dashboard.dart';
 
 class TempLoginScreen extends StatefulWidget {
@@ -239,7 +240,30 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
                     ),
                     textInputAction: TextInputAction.done,
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 8),
+
+                  // Forgot Password Link
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const ForgotPasswordScreen(),
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'نسيت كلمة المرور؟',
+                        style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.heroGradientStart,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
 
                   // Login Button
                   PressableNeumorphicCard(

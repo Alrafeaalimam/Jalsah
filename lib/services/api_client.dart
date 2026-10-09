@@ -1683,6 +1683,126 @@ class ApiClient {
   }
 
   // ==========================================================================
+  // PASSWORD RESET VIA EMAIL OTP API METHODS (Rule 14 & Rule 19)
+  // ==========================================================================
+
+  /// Requests a password reset OTP code to the specified email address.
+  /// Anti-enumeration protected: returns generic message regardless of email existence.
+  static Future<Map<String, dynamic>> forgotPassword(String email) async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/forgot-password');
+    final payload = jsonEncode({
+      'email': email.trim().toLowerCase(),
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: payload,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'message': body['data']?['message'] ??
+              'إذا كان هذا البريد مسجلاً في النظام، فستصلك رسالة تحتوي على كود التحقق',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? 'فشل طلب استعادة كلمة المرور',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم. يرجى المحاولة مرة أخرى.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع: $e',
+      };
+    }
+  }
+
+  /// Verifies OTP code and updates the user's password.
+  static Future<Map<String, dynamic>> resetPassword({
+    required String email,
+    required String otpCode,
+    required String newPassword,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/reset-password');
+    final payload = jsonEncode({
+      'email': email.trim().toLowerCase(),
+      'otpCode': otpCode.trim(),
+      'newPassword': newPassword,
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: payload,
+          )
+          .timeout(const Duration(seconds: 10));
+
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'message': body['data']?['message'] ??
+              'تم إعادة تعيين كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage':
+              body['errorMessage'] ?? 'فشل إعادة تعيين كلمة المرور',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم. يرجى المحاولة مرة أخرى.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع: $e',
+      };
+    }
+  }
+
+  // ==========================================================================
   // SUBSCRIPTION REDEEM & SUPER ADMIN API METHODS
   // ==========================================================================
 
