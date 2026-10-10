@@ -2117,6 +2117,200 @@ class ApiClient {
       };
     }
   }
+
+  /// Approves a pending tenant registration (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> approveTenant(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/approve');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل الموافقة على طلب التسجيل',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Rejects a pending tenant registration (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> rejectTenant(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/reject');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل رفض طلب التسجيل',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Suspends a tenant subscription (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> suspendTenant(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/suspend');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إيقاف حساب الشبكة',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Reactivates a suspended tenant (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> reactivateTenant(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/reactivate');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إعادة تفعيل حساب الشبكة',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Soft deletes a tenant (SUPER_ADMIN only - Rule 30).
+  static Future<Map<String, dynamic>> deleteTenant(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/delete');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل حذف الحساب',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Activates direct license for a tenant (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> adminActivateTenant({
+    required String tenantId,
+    required String planName,
+    required int durationDays,
+    required int maxRoutersLimit,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/activate-license');
+    final payload = jsonEncode({
+      'planName': planName.trim(),
+      'durationDays': durationDays,
+      'maxRoutersLimit': maxRoutersLimit,
+    });
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: payload)
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تفعيل الترخيص المباشر',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Lists users of a specific tenant (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> getAdminTenantUsers(String tenantId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/users');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final users = list
+            .map((item) => StaffUserModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+        return {'success': true, 'data': users};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب مستخدمي الشبكة',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Updates user role / promotion (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> updateUserRole({
+    required String userId,
+    required String role,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/users/$userId/role');
+    final payload = jsonEncode({'role': role});
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true), body: payload)
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تعديل دور المستخدم',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
 }
 
 

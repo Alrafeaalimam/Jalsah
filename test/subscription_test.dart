@@ -294,7 +294,7 @@ void main() {
       // Blocking screen must be visible
       expect(find.text('انتهت فترتك التجريبية'), findsOneWidget);
       expect(find.textContaining('SOFT ZONE'), findsOneWidget);
-      expect(find.textContaining('+249 90 000 0000'), findsOneWidget);
+      expect(find.textContaining('0115715672'), findsOneWidget);
       expect(find.text('التحقق من حالة الاشتراك'), findsOneWidget);
       expect(find.text('تسجيل الخروج'), findsOneWidget);
 

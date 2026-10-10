@@ -13,12 +13,15 @@ class AdminTenantModel {
   final String currency;
   final String status;
   final String subscriptionStatus;
+  final String approvalStatus;
   final DateTime? trialEndsAt;
   final DateTime? subscriptionEndsAt;
   final String? planName;
   final int maxRoutersLimit;
   final int usersCount;
   final int routersCount;
+  final bool isDeleted;
+  final DateTime? deletedAt;
   final DateTime createdAt;
 
   const AdminTenantModel({
@@ -30,12 +33,15 @@ class AdminTenantModel {
     required this.currency,
     required this.status,
     required this.subscriptionStatus,
+    this.approvalStatus = 'APPROVED',
     this.trialEndsAt,
     this.subscriptionEndsAt,
     this.planName,
     required this.maxRoutersLimit,
     required this.usersCount,
     required this.routersCount,
+    this.isDeleted = false,
+    this.deletedAt,
     required this.createdAt,
   });
 
@@ -43,6 +49,10 @@ class AdminTenantModel {
   bool get isActive => subscriptionStatus.toUpperCase() == 'ACTIVE';
   bool get isExpired => subscriptionStatus.toUpperCase() == 'EXPIRED';
   bool get isSuspended => subscriptionStatus.toUpperCase() == 'SUSPENDED';
+
+  bool get isPending => approvalStatus.toUpperCase() == 'PENDING';
+  bool get isApproved => approvalStatus.toUpperCase() == 'APPROVED';
+  bool get isRejected => approvalStatus.toUpperCase() == 'REJECTED';
 
   factory AdminTenantModel.fromJson(Map<String, dynamic> json) {
     return AdminTenantModel(
@@ -55,6 +65,8 @@ class AdminTenantModel {
       status: (json['status'] as String? ?? 'ACTIVE').toUpperCase(),
       subscriptionStatus:
           (json['subscriptionStatus'] as String? ?? 'TRIAL').toUpperCase(),
+      approvalStatus:
+          (json['approvalStatus'] as String? ?? 'APPROVED').toUpperCase(),
       trialEndsAt: json['trialEndsAt'] != null
           ? DateTime.tryParse(json['trialEndsAt'].toString())
           : null,
@@ -65,6 +77,10 @@ class AdminTenantModel {
       maxRoutersLimit: (json['maxRoutersLimit'] as num?)?.toInt() ?? 5,
       usersCount: (json['usersCount'] as num?)?.toInt() ?? 0,
       routersCount: (json['routersCount'] as num?)?.toInt() ?? 0,
+      isDeleted: json['isDeleted'] as bool? ?? false,
+      deletedAt: json['deletedAt'] != null
+          ? DateTime.tryParse(json['deletedAt'].toString())
+          : null,
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),

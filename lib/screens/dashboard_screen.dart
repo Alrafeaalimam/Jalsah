@@ -1573,7 +1573,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 16),
               PressableNeumorphicCard(
                 onTap: () {
-                  Clipboard.setData(const ClipboardData(text: '+249900000000'));
+                  Clipboard.setData(const ClipboardData(text: '0115715672'));
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       backgroundColor: AppColors.statusOnline,
@@ -1587,7 +1587,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'تم نسخ رقم الدعم: +249 90 000 0000',
+                              'تم نسخ رقم الدعم: 0115715672',
                               style: GoogleFonts.cairo(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w600,
@@ -1629,7 +1629,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            '+249 90 000 0000 (هاتف / واتساب)',
+                            '0115715672 (هاتف / واتساب)',
                             textDirection: TextDirection.ltr,
                             style: GoogleFonts.cairo(
                               fontSize: 12.5,

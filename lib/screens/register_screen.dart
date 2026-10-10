@@ -14,6 +14,7 @@ import '../theme/app_colors.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'dashboard_screen.dart';
+import 'temp_login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -131,7 +132,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await prefs.setString('user_role', 'TENANT_ADMIN');
       } catch (_) {}
 
-      if (!mounted) return;
+      final token = result['data']?['token'] as String?;
+      final successMsg = result['data']?['message'] as String? ??
+          'تم إرسال طلبك، بانتظار موافقة الإدارة';
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -146,7 +149,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'تم إنشاء الحساب بنجاح! أهلاً بك في نظام سوفت زون',
+                  token != null ? 'تم إنشاء الحساب بنجاح! أهلاً بك في نظام سوفت زون' : successMsg,
                   style: GoogleFonts.cairo(
                     color: Colors.white,
                     fontWeight: FontWeight.w600,
@@ -158,14 +161,63 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       );
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (context) => DashboardScreen(
-            userName: fullName,
+      if (token != null && token.isNotEmpty) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => DashboardScreen(
+              userName: fullName,
+            ),
           ),
-        ),
-        (route) => false,
-      );
+          (route) => false,
+        );
+      } else {
+        await showDialog(
+          context: context,
+          builder: (ctx) => Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              backgroundColor: AppColors.pageBg,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: Row(
+                children: [
+                  const Icon(Icons.hourglass_top_rounded, color: AppColors.heroGradientStart),
+                  const SizedBox(width: 10),
+                  Text(
+                    'طلب قيد المراجعة',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+              content: Text(
+                successMsg,
+                style: GoogleFonts.cairo(fontSize: 14),
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.heroGradientStart,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: Text(
+                    'حسناً',
+                    style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        if (!mounted) return;
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const TempLoginScreen()),
+          (route) => false,
+        );
+      }
     } else {
       setState(() {
         _isLoading = false;
