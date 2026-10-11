@@ -17,6 +17,7 @@ import 'dashboard_screen.dart';
 import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import 'admin/super_admin_dashboard.dart';
+import 'pending_approval_screen.dart';
 
 class TempLoginScreen extends StatefulWidget {
   const TempLoginScreen({super.key});
@@ -101,6 +102,22 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
         );
       }
     } else {
+      if (result['errorCode'] == 'ACCOUNT_PENDING_APPROVAL') {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = null;
+        });
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => PendingApprovalScreen(
+              username: username,
+              password: password,
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() {
         _isLoading = false;
         _errorMessage = result['errorMessage'] ?? 'بيانات الدخول غير صحيحة';
@@ -213,10 +230,10 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
                     const SizedBox(height: 20),
                   ],
 
-                  // Username Field
+                  // Username / Email Field
                   NeumorphicTextField(
-                    label: 'اسم المستخدم',
-                    hintText: 'أدخل اسم المستخدم (مثلاً: admin)',
+                    label: 'اسم المستخدم أو البريد الإلكتروني',
+                    hintText: 'أدخل اسم المستخدم أو البريد الإلكتروني',
                     controller: _usernameController,
                     prefixIcon: const Icon(
                       Icons.person_outline_rounded,

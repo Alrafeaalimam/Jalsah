@@ -47,6 +47,9 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
   String _tenantFilter = 'ALL'; // ALL, PENDING, ACTIVE, SUSPENDED
   String _codeFilter = 'ALL'; // ALL, UNUSED, USED
 
+  final Set<String> _loadingActionIds = {};
+  bool _isActionLoading(String id) => _loadingActionIds.contains(id);
+
   @override
   void initState() {
     super.initState();
@@ -180,7 +183,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
       ),
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (modalCtx, setModalState) {
             return Directionality(
               textDirection: TextDirection.rtl,
               child: Padding(
@@ -188,7 +191,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                   left: 24,
                   right: 24,
                   top: 24,
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                  bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 24,
                 ),
                 child: SingleChildScrollView(
                   child: Column(
@@ -576,6 +579,9 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
   }
 
   Future<void> _handleApproveTenant(AdminTenantModel tenant) async {
+    final actionId = '${tenant.id}_approve';
+    if (_isActionLoading(actionId)) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Directionality(
@@ -604,32 +610,40 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
     );
 
     if (confirmed == true) {
-      final res = await ApiClient.approveTenant(tenant.id);
-      if (!mounted) return;
-      if (res['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOnline,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text(res['data']?['message'] ?? 'تمت الموافقة بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
-        _loadTenants();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOffline,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text(res['errorMessage'] ?? 'فشلت الموافقة', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
+      setState(() => _loadingActionIds.add(actionId));
+      try {
+        final res = await ApiClient.approveTenant(tenant.id);
+        if (!mounted) return;
+        if (res['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOnline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text(res['data']?['message'] ?? 'تمت الموافقة بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+          _loadTenants();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text(res['errorMessage'] ?? 'فشلت الموافقة', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _loadingActionIds.remove(actionId));
       }
     }
   }
 
   Future<void> _handleRejectTenant(AdminTenantModel tenant) async {
+    final actionId = '${tenant.id}_reject';
+    if (_isActionLoading(actionId)) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Directionality(
@@ -658,32 +672,40 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
     );
 
     if (confirmed == true) {
-      final res = await ApiClient.rejectTenant(tenant.id);
-      if (!mounted) return;
-      if (res['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOffline,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text('تم رفض طلب التسجيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
-        _loadTenants();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOffline,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text(res['errorMessage'] ?? 'فشل رفض الطلب', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
+      setState(() => _loadingActionIds.add(actionId));
+      try {
+        final res = await ApiClient.rejectTenant(tenant.id);
+        if (!mounted) return;
+        if (res['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text('تم رفض طلب التسجيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+          _loadTenants();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text(res['errorMessage'] ?? 'فشل رفض الطلب', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _loadingActionIds.remove(actionId));
       }
     }
   }
 
   Future<void> _handleSuspendTenant(AdminTenantModel tenant) async {
+    final actionId = '${tenant.id}_suspend';
+    if (_isActionLoading(actionId)) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Directionality(
@@ -712,35 +734,73 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
     );
 
     if (confirmed == true) {
-      final res = await ApiClient.suspendTenant(tenant.id);
-      if (!mounted) return;
-      if (res['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOnline,
-            content: Text('تم إيقاف الحساب بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
-        _loadTenants();
+      setState(() => _loadingActionIds.add(actionId));
+      try {
+        final res = await ApiClient.suspendTenant(tenant.id);
+        if (!mounted) return;
+        if (res['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOnline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text('تم إيقاف الحساب بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+          _loadTenants();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text(res['errorMessage'] ?? 'فشل إيقاف الحساب', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _loadingActionIds.remove(actionId));
       }
     }
   }
 
   Future<void> _handleReactivateTenant(AdminTenantModel tenant) async {
-    final res = await ApiClient.reactivateTenant(tenant.id);
-    if (!mounted) return;
-    if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppColors.statusOnline,
-          content: Text('تمت إعادة تفعيل الحساب بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-        ),
-      );
-      _loadTenants();
+    final actionId = '${tenant.id}_reactivate';
+    if (_isActionLoading(actionId)) return;
+
+    setState(() => _loadingActionIds.add(actionId));
+    try {
+      final res = await ApiClient.reactivateTenant(tenant.id);
+      if (!mounted) return;
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOnline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text('تمت إعادة تفعيل الحساب بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+          ),
+        );
+        _loadTenants();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text(res['errorMessage'] ?? 'فشلت إعادة تفعيل الحساب', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingActionIds.remove(actionId));
     }
   }
 
   Future<void> _handleDeleteTenant(AdminTenantModel tenant) async {
+    final actionId = '${tenant.id}_delete';
+    if (_isActionLoading(actionId)) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Directionality(
@@ -786,20 +846,253 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
     );
 
     if (confirmed == true) {
-      final res = await ApiClient.deleteTenant(tenant.id);
-      if (!mounted) return;
-      if (res['success'] == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.statusOnline,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text('تم إخفاء وحذف الحساب منطقياً بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-          ),
-        );
-        _loadTenants();
+      setState(() => _loadingActionIds.add(actionId));
+      try {
+        final res = await ApiClient.deleteTenant(tenant.id);
+        if (!mounted) return;
+        if (res['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOnline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text('تم إخفاء وحذف الحساب منطقياً بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+          _loadTenants();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              content: Text(res['errorMessage'] ?? 'فشل حذف الحساب', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _loadingActionIds.remove(actionId));
       }
     }
+  }
+
+  void _showAddSuperAdminDialog() {
+    final fullNameController = TextEditingController();
+    final usernameController = TextEditingController();
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+    bool isSubmitting = false;
+    String? dialogError;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.pageBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return Directionality(
+              textDirection: TextDirection.rtl,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 24,
+                  right: 24,
+                  top: 24,
+                  bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 24,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppColors.heroGradientStart.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.admin_panel_settings_rounded,
+                              color: AppColors.heroGradientStart,
+                              size: 26,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'إضافة مدير منصة جديد',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                                Text(
+                                  'إنشاء حساب جديد بصلاحيات SUPER_ADMIN كاملة',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 12,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+
+                      if (dialogError != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.statusOffline.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.statusOffline.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Text(
+                            dialogError!,
+                            style: GoogleFonts.cairo(color: AppColors.statusOffline, fontSize: 13),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+
+                      NeumorphicTextField(
+                        controller: fullNameController,
+                        label: 'الاسم الكامل',
+                        hintText: 'مثال: م. عبد الرحمن أحمد',
+                        prefixIcon: const Icon(Icons.badge_rounded, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 14),
+
+                      NeumorphicTextField(
+                        controller: usernameController,
+                        label: 'اسم المستخدم',
+                        hintText: 'مثال: superadmin2',
+                        prefixIcon: const Icon(Icons.person_outline_rounded, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 14),
+
+                      NeumorphicTextField(
+                        controller: emailController,
+                        label: 'البريد الإلكتروني',
+                        hintText: 'مثال: admin@jalsah.network',
+                        keyboardType: TextInputType.emailAddress,
+                        prefixIcon: const Icon(Icons.email_outlined, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 14),
+
+                      NeumorphicTextField(
+                        controller: passwordController,
+                        label: 'كلمة المرور',
+                        hintText: '8 أحرف على الأقل',
+                        isPassword: true,
+                        prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.textMuted),
+                      ),
+                      const SizedBox(height: 22),
+
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.heroGradientStart,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                final fullName = fullNameController.text.trim();
+                                final username = usernameController.text.trim();
+                                final email = emailController.text.trim();
+                                final password = passwordController.text;
+
+                                if (fullName.isEmpty || username.isEmpty || email.isEmpty || password.isEmpty) {
+                                  setModalState(() => dialogError = 'يرجى إدخال جميع الحقول المطلوبة');
+                                  return;
+                                }
+
+                                if (password.length < 8) {
+                                  setModalState(() => dialogError = 'يجب ألا تقل كلمة المرور عن 8 أحرف');
+                                  return;
+                                }
+
+                                setModalState(() {
+                                  isSubmitting = true;
+                                  dialogError = null;
+                                });
+
+                                final res = await ApiClient.createSuperAdmin(
+                                  fullName: fullName,
+                                  username: username,
+                                  email: email,
+                                  password: password,
+                                );
+
+                                if (res['success'] == true) {
+                                  if (!mounted) return;
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      backgroundColor: AppColors.statusOnline,
+                                      behavior: SnackBarBehavior.floating,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      content: Text('تم إنشاء مدير المنصة بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+                                    ),
+                                  );
+                                } else {
+                                  setModalState(() {
+                                    isSubmitting = false;
+                                    dialogError = res['errorMessage'] ?? 'فشل إنشاء مدير المنصة';
+                                  });
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.person_add_rounded, color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'إضافة المدير',
+                                    style: GoogleFonts.cairo(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showDirectLicenseDialog(AdminTenantModel tenant) {
@@ -818,7 +1111,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
       ),
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (modalCtx, setModalState) {
             return Directionality(
               textDirection: TextDirection.rtl,
               child: Padding(
@@ -826,7 +1119,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                   left: 24,
                   right: 24,
                   top: 24,
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+                  bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 24,
                 ),
                 child: SingleChildScrollView(
                   child: Column(
@@ -950,7 +1243,8 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                                 );
 
                                 if (res['success'] == true) {
-                                  Navigator.of(ctx).pop();
+                                  if (!mounted) return;
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       backgroundColor: AppColors.statusOnline,
@@ -1132,6 +1426,11 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                 ),
               ],
             ),
+          ),
+          IconButton(
+            tooltip: 'إضافة مدير منصة',
+            icon: const Icon(Icons.person_add_rounded, color: AppColors.heroGradientStart),
+            onPressed: _showAddSuperAdminDialog,
           ),
           IconButton(
             tooltip: 'تحديث البيانات',
@@ -1349,6 +1648,34 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
               ),
             ),
 
+          // Action button to add new super admin
+          PressableNeumorphicCard(
+            onTap: _showAddSuperAdminDialog,
+            backgroundColor: AppColors.heroGradientStart,
+            borderRadius: BorderRadius.circular(16),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.person_add_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'إضافة مدير منصة',
+                  style: GoogleFonts.cairo(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
           // Search Bar
           NeumorphicTextField(
             label: 'بحث عن شركة أو شبكة',
@@ -1461,6 +1788,13 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
       statusColor = AppColors.textMuted;
       statusText = tenant.subscriptionStatus;
     }
+
+    final isApproving = _isActionLoading('${tenant.id}_approve');
+    final isRejecting = _isActionLoading('${tenant.id}_reject');
+    final isReactivating = _isActionLoading('${tenant.id}_reactivate');
+    final isSuspending = _isActionLoading('${tenant.id}_suspend');
+    final isDeleting = _isActionLoading('${tenant.id}_delete');
+    final isAnyActionRunning = isApproving || isRejecting || isReactivating || isSuspending || isDeleting;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1624,8 +1958,14 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    onPressed: () => _handleApproveTenant(tenant),
-                    icon: const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                    onPressed: isAnyActionRunning ? null : () => _handleApproveTenant(tenant),
+                    icon: isApproving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
                     label: Text(
                       'موافقة واعتماد',
                       style: GoogleFonts.cairo(
@@ -1646,8 +1986,14 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                       ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
-                    onPressed: () => _handleRejectTenant(tenant),
-                    icon: const Icon(Icons.cancel_outlined, color: AppColors.statusOffline, size: 18),
+                    onPressed: isAnyActionRunning ? null : () => _handleRejectTenant(tenant),
+                    icon: isRejecting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.statusOffline),
+                          )
+                        : const Icon(Icons.cancel_outlined, color: AppColors.statusOffline, size: 18),
                     label: Text(
                       'رفض الطلب',
                       style: GoogleFonts.cairo(
@@ -1674,7 +2020,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
-                  onPressed: () => _showDirectLicenseDialog(tenant),
+                  onPressed: isAnyActionRunning ? null : () => _showDirectLicenseDialog(tenant),
                   icon: const Icon(Icons.verified_rounded, color: Colors.white, size: 16),
                   label: Text(
                     'تفعيل مباشر',
@@ -1693,7 +2039,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
-                  onPressed: () => _showTenantUsersDialog(tenant),
+                  onPressed: isAnyActionRunning ? null : () => _showTenantUsersDialog(tenant),
                   icon: const Icon(Icons.manage_accounts_rounded, color: AppColors.heroGradientStart, size: 16),
                   label: Text(
                     'المستخدمين',
@@ -1713,8 +2059,14 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
-                    onPressed: () => _handleReactivateTenant(tenant),
-                    icon: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
+                    onPressed: isAnyActionRunning ? null : () => _handleReactivateTenant(tenant),
+                    icon: isReactivating
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
                     label: Text(
                       'إعادة تفعيل',
                       style: GoogleFonts.cairo(
@@ -1733,8 +2085,14 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
-                    onPressed: () => _handleSuspendTenant(tenant),
-                    icon: const Icon(Icons.pause_rounded, color: AppColors.accentYellow, size: 16),
+                    onPressed: isAnyActionRunning ? null : () => _handleSuspendTenant(tenant),
+                    icon: isSuspending
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.accentYellow),
+                          )
+                        : const Icon(Icons.pause_rounded, color: AppColors.accentYellow, size: 16),
                     label: Text(
                       'إيقاف مؤقت',
                       style: GoogleFonts.cairo(
@@ -1746,8 +2104,14 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                   ),
                 IconButton(
                   tooltip: 'إخفاء وحذف منطقي',
-                  icon: const Icon(Icons.delete_outline_rounded, color: AppColors.statusOffline, size: 20),
-                  onPressed: () => _handleDeleteTenant(tenant),
+                  icon: isDeleting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.statusOffline),
+                        )
+                      : const Icon(Icons.delete_outline_rounded, color: AppColors.statusOffline, size: 20),
+                  onPressed: isAnyActionRunning ? null : () => _handleDeleteTenant(tenant),
                 ),
               ],
             ),
@@ -2083,6 +2447,7 @@ class _TenantUsersSheet extends StatefulWidget {
 class _TenantUsersSheetState extends State<_TenantUsersSheet> {
   bool _isLoading = true;
   String? _error;
+  String? _updatingUserId;
   List<StaffUserModel> _users = [];
 
   @override
@@ -2114,29 +2479,36 @@ class _TenantUsersSheetState extends State<_TenantUsersSheet> {
   }
 
   Future<void> _changeRole(StaffUserModel user, String newRole) async {
-    final res = await ApiClient.updateUserRole(userId: user.id, role: newRole);
-    if (!mounted) return;
+    setState(() => _updatingUserId = user.id);
+    try {
+      final res = await ApiClient.updateUserRole(userId: user.id, role: newRole);
+      if (!mounted) return;
 
-    if (res['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppColors.statusOnline,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Text('تم تحديث دور المستخدم بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-        ),
-      );
-      widget.onRoleChanged();
-      _loadUsers();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppColors.statusOffline,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Text(res['errorMessage'] ?? 'فشل تحديث الدور', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
-        ),
-      );
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOnline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text('تم تحديث دور المستخدم بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+          ),
+        );
+        widget.onRoleChanged();
+        await _loadUsers();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text(res['errorMessage'] ?? 'فشل تحديث الدور', style: GoogleFonts.cairo(fontWeight: FontWeight.w600)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updatingUserId = null);
+      }
     }
   }
 
@@ -2251,7 +2623,7 @@ class _TenantUsersSheetState extends State<_TenantUsersSheet> {
                           ? Center(child: Text('لا يوجد مستخدمين مسجلين', style: GoogleFonts.cairo(color: AppColors.textMuted)))
                           : ListView.separated(
                               itemCount: _users.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              separatorBuilder: (_, _) => const SizedBox(height: 10),
                               itemBuilder: (ctx, index) {
                                 final user = _users[index];
                                 return Container(
@@ -2294,32 +2666,47 @@ class _TenantUsersSheetState extends State<_TenantUsersSheet> {
                                           ],
                                         ),
                                       ),
-                                      InkWell(
-                                        onTap: () => _showRolePicker(user),
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                          decoration: BoxDecoration(
-                                            color: user.roleColor.withValues(alpha: 0.12),
+                                      Builder(
+                                        builder: (context) {
+                                          final isUpdating = _updatingUserId == user.id;
+                                          return InkWell(
+                                            onTap: isUpdating ? null : () => _showRolePicker(user),
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: user.roleColor.withValues(alpha: 0.4)),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                user.roleArabic,
-                                                style: GoogleFonts.cairo(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: user.roleColor,
-                                                ),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                              decoration: BoxDecoration(
+                                                color: user.roleColor.withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: Border.all(color: user.roleColor.withValues(alpha: 0.4)),
                                               ),
-                                              const SizedBox(width: 4),
-                                              Icon(Icons.edit_rounded, size: 14, color: user.roleColor),
-                                            ],
-                                          ),
-                                        ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  if (isUpdating) ...[
+                                                    SizedBox(
+                                                      width: 12,
+                                                      height: 12,
+                                                      child: CircularProgressIndicator(strokeWidth: 2, color: user.roleColor),
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                  ],
+                                                  Text(
+                                                    user.roleArabic,
+                                                    style: GoogleFonts.cairo(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: user.roleColor,
+                                                    ),
+                                                  ),
+                                                  if (!isUpdating) ...[
+                                                    const SizedBox(width: 4),
+                                                    Icon(Icons.edit_rounded, size: 14, color: user.roleColor),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ],
                                   ),

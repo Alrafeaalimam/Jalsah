@@ -111,11 +111,14 @@ class ApiClient {
   /// stores the JWT token in memory and SharedPreferences.
   static Future<Map<String, dynamic>> login({
     required String username,
+    String? identifier,
     required String password,
   }) async {
+    final effectiveIdentifier = (identifier ?? username).trim();
     final uri = Uri.parse('$baseUrl/api/v1/auth/login');
     final payload = jsonEncode({
-      'username': username.trim(),
+      'identifier': effectiveIdentifier,
+      'username': effectiveIdentifier,
       'password': password,
     });
 
@@ -161,6 +164,7 @@ class ApiClient {
           'success': false,
           'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
           'errorMessage': body['errorMessage'] ??
+              body['message'] ??
               'فشل تسجيل الدخول (${response.statusCode})',
         };
       }
@@ -2306,6 +2310,39 @@ class ApiClient {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
         'errorMessage': body['errorMessage'] ?? 'فشل تعديل دور المستخدم',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Creates a new platform SUPER_ADMIN user (SUPER_ADMIN only).
+  static Future<Map<String, dynamic>> createSuperAdmin({
+    required String fullName,
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/super-admins');
+    final payload = jsonEncode({
+      'fullName': fullName.trim(),
+      'username': username.trim(),
+      'email': email.trim().toLowerCase(),
+      'password': password,
+    });
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: payload)
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 201 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إنشاء مدير المنصة',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};

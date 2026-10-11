@@ -72,7 +72,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('تسجيل الدخول'), findsWidgets);
-      expect(find.text('اسم المستخدم'), findsOneWidget);
+      expect(find.text('اسم المستخدم أو البريد الإلكتروني'), findsOneWidget);
       expect(find.text('كلمة المرور'), findsOneWidget);
       expect(find.byType(NeumorphicTextField), findsNWidgets(2));
       expect(find.byIcon(Icons.login_rounded), findsOneWidget);
@@ -119,7 +119,7 @@ void main() {
 
       // Enter wrong credentials
       await tester.enterText(
-        find.widgetWithText(NeumorphicTextField, 'اسم المستخدم'),
+        find.widgetWithText(NeumorphicTextField, 'اسم المستخدم أو البريد الإلكتروني'),
         'admin',
       );
       await tester.enterText(
@@ -176,7 +176,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(
-        find.widgetWithText(NeumorphicTextField, 'اسم المستخدم'),
+        find.widgetWithText(NeumorphicTextField, 'اسم المستخدم أو البريد الإلكتروني'),
         'admin',
       );
       await tester.enterText(
