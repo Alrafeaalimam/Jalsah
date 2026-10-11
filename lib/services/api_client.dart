@@ -2127,7 +2127,7 @@ class ApiClient {
     final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/approve');
     try {
       final response = await client
-          .patch(uri, headers: _buildHeaders(isJson: true))
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
           .timeout(timeoutDuration);
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
@@ -2137,7 +2137,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
-        'errorMessage': body['errorMessage'] ?? 'فشل الموافقة على طلب التسجيل',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل الموافقة على طلب التسجيل',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
@@ -2149,7 +2149,7 @@ class ApiClient {
     final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/reject');
     try {
       final response = await client
-          .patch(uri, headers: _buildHeaders(isJson: true))
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
           .timeout(timeoutDuration);
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
@@ -2159,7 +2159,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
-        'errorMessage': body['errorMessage'] ?? 'فشل رفض طلب التسجيل',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل رفض طلب التسجيل',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
@@ -2171,7 +2171,7 @@ class ApiClient {
     final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/suspend');
     try {
       final response = await client
-          .patch(uri, headers: _buildHeaders(isJson: true))
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
           .timeout(timeoutDuration);
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
@@ -2181,7 +2181,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
-        'errorMessage': body['errorMessage'] ?? 'فشل إيقاف حساب الشبكة',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل إيقاف حساب الشبكة',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
@@ -2193,7 +2193,7 @@ class ApiClient {
     final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/reactivate');
     try {
       final response = await client
-          .patch(uri, headers: _buildHeaders(isJson: true))
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
           .timeout(timeoutDuration);
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
@@ -2203,7 +2203,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
-        'errorMessage': body['errorMessage'] ?? 'فشل إعادة تفعيل حساب الشبكة',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل إعادة تفعيل حساب الشبكة',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
@@ -2215,7 +2215,7 @@ class ApiClient {
     final uri = Uri.parse('$baseUrl/api/v1/admin/tenants/$tenantId/delete');
     try {
       final response = await client
-          .patch(uri, headers: _buildHeaders(isJson: true))
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
           .timeout(timeoutDuration);
       final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
       final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
@@ -2225,7 +2225,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
-        'errorMessage': body['errorMessage'] ?? 'فشل حذف الحساب',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل حذف الحساب',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
@@ -2343,6 +2343,35 @@ class ApiClient {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
         'errorMessage': body['errorMessage'] ?? 'فشل إنشاء مدير المنصة',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Fetches the profile of the currently authenticated user (Rule 14, Rule 26).
+  static Future<Map<String, dynamic>> getCurrentUserProfile() async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/me');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {'success': true, 'data': body['data']};
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل جلب بيانات الملف الشخصي',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};

@@ -15,6 +15,7 @@ import '../widgets/pressable_neumorphic_card.dart';
 import 'admin/super_admin_dashboard.dart';
 import 'dashboard_screen.dart';
 import 'temp_login_screen.dart';
+import '../utils/whatsapp_helper.dart';
 
 class PendingApprovalScreen extends StatefulWidget {
   final String? username;
@@ -351,6 +352,14 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // WhatsApp Direct Support Card
+                  buildWhatsAppSupportCard(
+                    context: context,
+                    title: 'تواصل مباشر مع الإدارة لتفعيل الحساب',
+                    subtitle: 'راسلنا مباشرة عبر واتساب للمراجعة والاعتماد الفوري',
                   ),
 
                   if (_statusFeedback != null) ...[

@@ -14,10 +14,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:mikrotik_cards_app/models/admin_tenant_model.dart';
 import 'package:mikrotik_cards_app/screens/admin/super_admin_dashboard.dart';
 import 'package:mikrotik_cards_app/screens/pending_approval_screen.dart';
 import 'package:mikrotik_cards_app/screens/temp_login_screen.dart';
+import 'package:mikrotik_cards_app/screens/user_profile_screen.dart';
+import 'package:mikrotik_cards_app/utils/whatsapp_helper.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
 import 'package:mikrotik_cards_app/widgets/pressable_neumorphic_card.dart';
 
@@ -272,5 +273,102 @@ void main() {
       expect(find.text('موافقة واعتماد'), findsOneWidget);
       expect(find.text('رفض الطلب'), findsOneWidget);
     });
+
+    test('ApiClient tenant PATCH actions supply body "{}" and read backend error message', () async {
+      ApiClient.client = MockClient((request) async {
+        expect(request.method, equals('PATCH'));
+        expect(request.headers['content-type'], contains('application/json'));
+        expect(request.body, equals('{}'));
+
+        if (request.url.path.contains('/delete')) {
+          return utf8Response({
+            'success': false,
+            'errorCode': 'OPERATION_FAILED',
+            'message': 'لا يمكن حذف الحساب الافتراضي للمنصة',
+          }, 400);
+        }
+
+        return utf8Response({'success': true, 'data': {'id': 't-1'}}, 200);
+      });
+
+      final approveRes = await ApiClient.approveTenant('t-1');
+      expect(approveRes['success'], isTrue);
+
+      final deleteRes = await ApiClient.deleteTenant('t-default');
+      expect(deleteRes['success'], isFalse);
+      expect(deleteRes['errorMessage'], equals('لا يمكن حذف الحساب الافتراضي للمنصة'));
+    });
+
+    testWidgets('SuperAdminDashboardScreen utilizes NestedScrollView for collapsible header',
+        (WidgetTester tester) async {
+      ApiClient.client = MockClient((request) async {
+        return utf8Response({'success': true, 'data': []}, 200);
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: SuperAdminDashboardScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NestedScrollView), findsOneWidget);
+      expect(find.byType(SliverPersistentHeader), findsOneWidget);
+    });
+
+    testWidgets('UserProfileScreen renders user details and logout option',
+        (WidgetTester tester) async {
+      ApiClient.client = MockClient((request) async {
+        if (request.url.path == '/api/v1/auth/me') {
+          return utf8Response({
+            'success': true,
+            'data': {
+              'id': 'u-prof-1',
+              'username': 'ahmed_boss',
+              'fullName': 'أحمد محمد علي',
+              'email': 'ahmed@jalsah.sd',
+              'role': 'TENANT_ADMIN',
+              'networkName': 'شبكة النيل الأزرق',
+              'status': 'ACTIVE',
+            },
+          }, 200);
+        }
+        return utf8Response({'success': true, 'data': {}}, 200);
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: UserProfileScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('الملف الشخصي'), findsOneWidget);
+      expect(find.text('أحمد محمد علي'), findsWidgets);
+      expect(find.text('ahmed_boss'), findsOneWidget);
+      expect(find.text('ahmed@jalsah.sd'), findsOneWidget);
+      expect(find.text('شبكة النيل الأزرق'), findsOneWidget);
+      expect(find.text('تسجيل الخروج'), findsOneWidget);
+    });
+
+    testWidgets('buildWhatsAppSupportCard renders both support numbers 0115715672 and 0115715651',
+        (WidgetTester tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => buildWhatsAppSupportCard(context: context),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(kSupportPhone1), findsOneWidget);
+      expect(find.text(kSupportPhone2), findsOneWidget);
+      expect(find.text('0115715672'), findsOneWidget);
+      expect(find.text('0115715651'), findsOneWidget);
+    });
   });
 }
+

@@ -6,7 +6,6 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -25,6 +24,8 @@ import 'packages_screen.dart';
 import 'sales_report_screen.dart';
 import 'staff_screen.dart';
 import 'temp_login_screen.dart';
+import 'user_profile_screen.dart';
+import '../utils/whatsapp_helper.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String userName;
@@ -838,38 +839,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.22),
-                        width: 1,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.22),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(
+                                color: AppColors.statusOnline,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'نظام متصل',
+                              style: GoogleFonts.cairo(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white.withValues(alpha: 0.9),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: const BoxDecoration(
-                            color: AppColors.statusOnline,
-                            shape: BoxShape.circle,
+                      const SizedBox(width: 8),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => UserProfileScreen(
+                                  initialFullName: widget.userName,
+                                ),
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.35),
+                                width: 1.2,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.person_rounded,
+                              size: 18,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'نظام متصل',
-                          style: GoogleFonts.cairo(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.9),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1570,83 +1608,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              PressableNeumorphicCard(
-                onTap: () {
-                  Clipboard.setData(const ClipboardData(text: '0115715672'));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      backgroundColor: AppColors.statusOnline,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      content: Row(
-                        children: [
-                          const Icon(Icons.check_circle_rounded, color: Colors.white),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'تم نسخ رقم الدعم: 0115715672',
-                              style: GoogleFonts.cairo(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(18),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.statusOnline.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.support_agent_rounded,
-                        color: AppColors.statusOnline,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'تواصل للاشتراك (SOFT ZONE)',
-                            style: GoogleFonts.cairo(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textDark,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '0115715672 (هاتف / واتساب)',
-                            textDirection: TextDirection.ltr,
-                            style: GoogleFonts.cairo(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(
-                      Icons.content_copy_rounded,
-                      size: 18,
-                      color: AppColors.textMuted,
-                    ),
-                  ],
-                ),
+              buildWhatsAppSupportCard(
+                context: context,
+                title: 'تواصل للاشتراك وتفعيل الباقات (SOFT ZONE)',
+                subtitle: 'تواصل عبر واتساب لتفعيل اشتراك شبكتك فوراً',
               ),
               const SizedBox(height: 20),
               OutlinedButton.icon(

@@ -1311,63 +1311,78 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
       child: Scaffold(
         backgroundColor: AppColors.pageBg,
         body: SafeArea(
-          child: Column(
-            children: [
-              // Header Banner
-              _buildTopBar(),
+          child: NestedScrollView(
+            headerSliverBuilder: (BuildContext context, bool innerBoxIsScrolled) {
+              return [
+                // Collapsible Header Section (Top Bar + Stats Metrics)
+                SliverToBoxAdapter(
+                  child: Column(
+                    children: [
+                      // Header Banner
+                      _buildTopBar(),
 
-              // Quick Stats Metrics
-              _buildMetricsBar(
-                totalTenants: _tenants.length,
-                activeTenants: activeTenants,
-                totalCodes: _codes.length,
-                unusedCodes: unusedCodesCount,
-              ),
-
-              // Tab Bar
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.shadowDark.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: TabBar(
-                  controller: _tabController,
-                  indicatorSize: TabBarIndicatorSize.tab,
-                  indicator: BoxDecoration(
-                    color: AppColors.heroGradientStart,
-                    borderRadius: BorderRadius.circular(14),
+                      // Quick Stats Metrics
+                      _buildMetricsBar(
+                        totalTenants: _tenants.length,
+                        activeTenants: activeTenants,
+                        totalCodes: _codes.length,
+                        unusedCodes: unusedCodesCount,
+                      ),
+                    ],
                   ),
-                  labelColor: Colors.white,
-                  unselectedLabelColor: AppColors.textMuted,
-                  labelStyle: GoogleFonts.cairo(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13.5,
-                  ),
-                  tabs: [
-                    Tab(
-                      icon: const Icon(Icons.apartment_rounded, size: 20),
-                      text: 'الشركات والشبكات (${_tenants.length})',
-                    ),
-                    Tab(
-                      icon: const Icon(Icons.vpn_key_rounded, size: 20),
-                      text: 'أكواد الترخيص (${_codes.length})',
-                    ),
-                  ],
                 ),
-              ),
 
-              // Tab Views
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildTenantsTab(),
-                    _buildCodesTab(),
-                  ],
+                // Pinned Tab Bar that stays fixed when header collapses
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _SliverTabBarDelegate(
+                    Container(
+                      color: AppColors.pageBg,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.shadowDark.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: TabBar(
+                          controller: _tabController,
+                          indicatorSize: TabBarIndicatorSize.tab,
+                          indicator: BoxDecoration(
+                            color: AppColors.heroGradientStart,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          labelColor: Colors.white,
+                          unselectedLabelColor: AppColors.textMuted,
+                          labelStyle: GoogleFonts.cairo(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13.5,
+                          ),
+                          tabs: [
+                            Tab(
+                              icon: const Icon(Icons.apartment_rounded, size: 20),
+                              text: 'الشركات والشبكات (${_tenants.length})',
+                            ),
+                            Tab(
+                              icon: const Icon(Icons.vpn_key_rounded, size: 20),
+                              text: 'أكواد الترخيص (${_codes.length})',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    height: 64.0,
+                  ),
                 ),
-              ),
-            ],
+              ];
+            },
+            // Scrollable Tab Views
+            body: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildTenantsTab(),
+                _buildCodesTab(),
+              ],
+            ),
           ),
         ),
       ),
@@ -2719,4 +2734,25 @@ class _TenantUsersSheetState extends State<_TenantUsersSheet> {
       ),
     );
   }
+}
+
+class _SliverTabBarDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+  final double height;
+
+  _SliverTabBarDelegate(this.child, {this.height = 64.0});
+
+  @override
+  double get minExtent => height;
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(_SliverTabBarDelegate oldDelegate) => true;
 }

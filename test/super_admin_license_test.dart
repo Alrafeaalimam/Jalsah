@@ -16,7 +16,6 @@ import 'package:http/testing.dart';
 
 import 'package:mikrotik_cards_app/models/admin_tenant_model.dart';
 import 'package:mikrotik_cards_app/models/license_code_model.dart';
-import 'package:mikrotik_cards_app/models/subscription_status_model.dart';
 import 'package:mikrotik_cards_app/screens/admin/super_admin_dashboard.dart';
 import 'package:mikrotik_cards_app/screens/dashboard_screen.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
