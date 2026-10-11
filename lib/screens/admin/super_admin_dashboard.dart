@@ -11,8 +11,10 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../models/admin_tenant_model.dart';
 import '../../models/license_code_model.dart';
+import '../../models/platform_settings_model.dart';
 import '../../models/staff_user_model.dart';
 import '../../services/api_client.dart';
+import '../../services/app_settings.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/neumorphic_text_field.dart';
 import '../../widgets/pressable_neumorphic_card.dart';
@@ -47,19 +49,34 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
   String _tenantFilter = 'ALL'; // ALL, PENDING, ACTIVE, SUSPENDED
   String _codeFilter = 'ALL'; // ALL, UNUSED, USED
 
+  late TextEditingController _supportEmailController;
+  late TextEditingController _appNameController;
+  final TextEditingController _newPhoneController = TextEditingController();
+  List<String> _whatsappNumbers = [];
+  bool _isSavingSettings = false;
+  String? _settingsError;
+
   final Set<String> _loadingActionIds = {};
   bool _isActionLoading(String id) => _loadingActionIds.contains(id);
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _supportEmailController =
+        TextEditingController(text: AppSettings.instance.supportEmail);
+    _appNameController =
+        TextEditingController(text: AppSettings.instance.appName);
+    _whatsappNumbers = List<String>.from(AppSettings.instance.whatsappNumbers);
     _loadAllData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _supportEmailController.dispose();
+    _appNameController.dispose();
+    _newPhoneController.dispose();
     super.dispose();
   }
 
@@ -67,7 +84,20 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
     await Future.wait([
       _loadTenants(),
       _loadCodes(),
+      _loadPlatformSettings(),
     ]);
+  }
+
+  Future<void> _loadPlatformSettings() async {
+    await AppSettings.instance.loadSettings();
+    if (mounted) {
+      setState(() {
+        _supportEmailController.text = AppSettings.instance.supportEmail;
+        _appNameController.text = AppSettings.instance.appName;
+        _whatsappNumbers =
+            List<String>.from(AppSettings.instance.whatsappNumbers);
+      });
+    }
   }
 
   Future<void> _loadTenants() async {
@@ -1366,6 +1396,10 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                               icon: const Icon(Icons.vpn_key_rounded, size: 20),
                               text: 'أكواد الترخيص (${_codes.length})',
                             ),
+                            const Tab(
+                              icon: Icon(Icons.tune_rounded, size: 20),
+                              text: 'الإعدادات العامة',
+                            ),
                           ],
                         ),
                       ),
@@ -1381,6 +1415,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
               children: [
                 _buildTenantsTab(),
                 _buildCodesTab(),
+                _buildSettingsTab(),
               ],
             ),
           ),
@@ -1441,6 +1476,11 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                 ),
               ],
             ),
+          ),
+          IconButton(
+            tooltip: 'إرسال إشعار للعملاء',
+            icon: const Icon(Icons.campaign_rounded, color: AppColors.heroGradientStart),
+            onPressed: _showSendNotificationDialog,
           ),
           IconButton(
             tooltip: 'إضافة مدير منصة',
@@ -2442,6 +2482,689 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSettingsTab() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      children: [
+        // Platform Information Card
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: AppColors.shadowLight,
+                offset: Offset(-3, -3),
+                blurRadius: 8,
+              ),
+              BoxShadow(
+                color: AppColors.shadowDark,
+                offset: Offset(3, 3),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.heroGradientStart.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.settings_suggest_rounded,
+                      color: AppColors.heroGradientStart,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'بيانات المنصة الأساسية',
+                    style: GoogleFonts.cairo(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              NeumorphicTextField(
+                label: 'اسم التطبيق والمنصة',
+                controller: _appNameController,
+                hintText: 'اسم التطبيق (مثال: جلسة)',
+                prefixIcon: const Icon(Icons.badge_outlined),
+              ),
+              const SizedBox(height: 16),
+              NeumorphicTextField(
+                label: 'البريد الإلكتروني للدعم الفني',
+                controller: _supportEmailController,
+                hintText: 'support@example.com',
+                prefixIcon: const Icon(Icons.email_outlined),
+                keyboardType: TextInputType.emailAddress,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // WhatsApp Numbers Management Card
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: AppColors.shadowLight,
+                offset: Offset(-3, -3),
+                blurRadius: 8,
+              ),
+              BoxShadow(
+                color: AppColors.shadowDark,
+                offset: Offset(3, 3),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.statusOnline.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.chat_bubble_rounded,
+                      color: AppColors.statusOnline,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'أرقام الواتساب للدعم الفني',
+                          style: GoogleFonts.cairo(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        Text(
+                          'تظهر تلقائياً في شاشات الدعم والتسجيل والملف الشخصي',
+                          style: GoogleFonts.cairo(
+                            fontSize: 11,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Current numbers list
+              if (_whatsappNumbers.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'لم يتم تحديد أي رقم واتساب حتى الآن',
+                    style: GoogleFonts.cairo(fontSize: 13, color: AppColors.textMuted),
+                  ),
+                )
+              else
+                ..._whatsappNumbers.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final phone = entry.value;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.shadowDark.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.phone_android_rounded,
+                          size: 18,
+                          color: AppColors.statusOnline,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            phone,
+                            textDirection: TextDirection.ltr,
+                            style: GoogleFonts.cairo(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline_rounded,
+                              color: AppColors.statusOffline, size: 20),
+                          tooltip: 'حذف الرقم',
+                          onPressed: () {
+                            if (_whatsappNumbers.length <= 1) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'يجب الإبقاء على رقم واتساب واحد على الأقل',
+                                    style: GoogleFonts.cairo(),
+                                  ),
+                                  backgroundColor: AppColors.statusOffline,
+                                ),
+                              );
+                              return;
+                            }
+                            setState(() {
+                              _whatsappNumbers.removeAt(index);
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              const SizedBox(height: 12),
+              // Add new phone row
+              Row(
+                children: [
+                  Expanded(
+                    child: NeumorphicTextField(
+                      label: 'رقم واتساب جديد',
+                      controller: _newPhoneController,
+                      hintText: '0115715672',
+                      prefixIcon: const Icon(Icons.add_call),
+                      keyboardType: TextInputType.phone,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      final newPhone = _newPhoneController.text.trim();
+                      if (newPhone.isEmpty) return;
+                      if (_whatsappNumbers.contains(newPhone)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('الرقم مضاف بالفعل', style: GoogleFonts.cairo()),
+                            backgroundColor: AppColors.statusOffline,
+                          ),
+                        );
+                        return;
+                      }
+                      setState(() {
+                        _whatsappNumbers.add(newPhone);
+                        _newPhoneController.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.add, size: 18),
+                    label: Text('إضافة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.statusOnline,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Brand Palette Overview Card
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: const [
+              BoxShadow(
+                color: AppColors.shadowLight,
+                offset: Offset(-3, -3),
+                blurRadius: 8,
+              ),
+              BoxShadow(
+                color: AppColors.shadowDark,
+                offset: Offset(3, 3),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentYellow.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.palette_outlined,
+                      color: Color(0xFFD97706),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'ألوان الهوية المخزنة بالنظام',
+                    style: GoogleFonts.cairo(
+                      fontSize: 15.5,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'اللون الأساسي: ${AppSettings.instance.primaryColorHex ?? "#3B2FA0"} • اللون الثانوي: ${AppSettings.instance.accentColorHex ?? "#F5C94B"} (محفوظة بقاعدة البيانات)',
+                style: GoogleFonts.cairo(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 28),
+
+        // Save Settings Action Button
+        PressableNeumorphicCard(
+          onTap: _isSavingSettings ? null : _saveSettings,
+          backgroundColor: AppColors.heroGradientStart,
+          borderRadius: BorderRadius.circular(16),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Center(
+            child: _isSavingSettings
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.save_rounded, color: Colors.white, size: 20),
+                      const SizedBox(width: 10),
+                      Text(
+                        'حفظ الإعدادات العامة',
+                        style: GoogleFonts.cairo(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(height: 40),
+      ],
+    );
+  }
+
+  Future<void> _saveSettings() async {
+    final email = _supportEmailController.text.trim();
+    final name = _appNameController.text.trim();
+
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('يرجى إدخال بريد إلكتروني صحيح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+      return;
+    }
+
+    if (_whatsappNumbers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('يجب توفير رقم واتساب واحد على الأقل', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSavingSettings = true;
+      _settingsError = null;
+    });
+
+    final res = await ApiClient.updateAdminSettings(
+      supportEmail: email,
+      whatsappNumbers: _whatsappNumbers,
+      appName: name.isNotEmpty ? name : 'جلسة',
+    );
+
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      final updated = res['data'] as PlatformSettingsModel;
+      AppSettings.instance.updateLocally(updated);
+      setState(() {
+        _isSavingSettings = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res['message'] as String? ?? 'تم حفظ الإعدادات بنجاح',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: AppColors.statusOnline,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } else {
+      setState(() {
+        _isSavingSettings = false;
+        _settingsError = res['errorMessage'] as String? ?? 'فشل حفظ الإعدادات';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_settingsError!, style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _showSendNotificationDialog() {
+    final titleController = TextEditingController();
+    final bodyController = TextEditingController();
+    String? selectedTenantId;
+    bool isSending = false;
+    String? dialogError;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.pageBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 24,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppColors.heroGradientStart.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Icon(
+                            Icons.campaign_rounded,
+                            color: AppColors.heroGradientStart,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'إرسال إشعار للعملاء',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              Text(
+                                'يمكنك بث إشعار عام للجميع أو لشركة محددة',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 12,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => Navigator.of(modalContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    if (dialogError != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.statusOffline.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppColors.statusOffline.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          dialogError!,
+                          style: GoogleFonts.cairo(
+                            color: AppColors.statusOffline,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    Text(
+                      'الجهة المستهدفة',
+                      style: GoogleFonts.cairo(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppColors.shadowDark.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String?>(
+                          value: selectedTenantId,
+                          isExpanded: true,
+                          items: [
+                            DropdownMenuItem<String?>(
+                              value: null,
+                              child: Text(
+                                '📢 بث لجميع الشركات والشبكات',
+                                style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            ..._tenants.map(
+                              (t) => DropdownMenuItem<String?>(
+                                value: t.id,
+                                child: Text(
+                                  '🏢 ${t.name}',
+                                  style: GoogleFonts.cairo(fontSize: 13),
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            setModalState(() {
+                              selectedTenantId = val;
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    NeumorphicTextField(
+                      label: 'عنوان الإشعار',
+                      controller: titleController,
+                      hintText: 'مثال: تحديث أمني هام',
+                      prefixIcon: const Icon(Icons.title_rounded),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'نص الإشعار',
+                      style: GoogleFonts.cairo(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: bodyController,
+                      maxLines: 4,
+                      style: GoogleFonts.cairo(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'اكتب نص الإشعار هنا بالتفصيل...',
+                        hintStyle: GoogleFonts.cairo(color: AppColors.textMuted, fontSize: 13),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppColors.shadowDark.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: AppColors.shadowDark.withValues(alpha: 0.35),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    PressableNeumorphicCard(
+                      onTap: isSending
+                          ? null
+                          : () async {
+                              final t = titleController.text.trim();
+                              final b = bodyController.text.trim();
+                              if (t.isEmpty || b.isEmpty) {
+                                setModalState(() {
+                                  dialogError = 'يرجى إدخال عنوان ونص الإشعار';
+                                });
+                                return;
+                              }
+
+                              setModalState(() {
+                                isSending = true;
+                                dialogError = null;
+                              });
+
+                              final res = await ApiClient.sendAdminNotification(
+                                title: t,
+                                body: b,
+                                tenantId: selectedTenantId,
+                              );
+
+                              if (res['success'] == true) {
+                                if (!mounted) return;
+                                if (modalContext.mounted) {
+                                  Navigator.of(modalContext).pop();
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      res['message'] as String? ?? 'تم إرسال الإشعار بنجاح',
+                                      style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+                                    ),
+                                    backgroundColor: AppColors.statusOnline,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else {
+                                setModalState(() {
+                                  isSending = false;
+                                  dialogError =
+                                      res['errorMessage'] as String? ?? 'فشل إرسال الإشعار';
+                                });
+                              }
+                            },
+                      backgroundColor: AppColors.heroGradientStart,
+                      borderRadius: BorderRadius.circular(16),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: isSending
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'إرسال الإشعار الآن',
+                                    style: GoogleFonts.cairo(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

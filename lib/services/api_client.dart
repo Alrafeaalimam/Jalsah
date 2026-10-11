@@ -20,6 +20,8 @@ import '../models/staff_user_model.dart';
 import '../models/subscription_status_model.dart';
 import '../models/admin_tenant_model.dart';
 import '../models/license_code_model.dart';
+import '../models/platform_settings_model.dart';
+import '../models/notification_model.dart';
 
 class ApiClient {
   static const String baseUrl = 'http://127.0.0.1:3000';
@@ -2372,6 +2374,149 @@ class ApiClient {
         'success': false,
         'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
         'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل جلب بيانات الملف الشخصي',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Fetches public platform settings (No auth required)
+  static Future<PlatformSettingsModel?> getPublicSettings() async {
+    final uri = Uri.parse('$baseUrl/api/v1/settings/public');
+    try {
+      final response = await client.get(uri).timeout(timeoutDuration);
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (decoded is Map<String, dynamic> && decoded['data'] != null) {
+          return PlatformSettingsModel.fromJson(decoded['data'] as Map<String, dynamic>);
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Updates platform settings (Super Admin Only)
+  static Future<Map<String, dynamic>> updateAdminSettings({
+    String? supportEmail,
+    List<String>? whatsappNumbers,
+    String? appName,
+    String? primaryColorHex,
+    String? accentColorHex,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/settings');
+    final payload = <String, dynamic>{};
+    if (supportEmail != null) payload['supportEmail'] = supportEmail;
+    if (whatsappNumbers != null) payload['whatsappNumbers'] = whatsappNumbers;
+    if (appName != null) payload['appName'] = appName;
+    if (primaryColorHex != null) payload['primaryColorHex'] = primaryColorHex;
+    if (accentColorHex != null) payload['accentColorHex'] = accentColorHex;
+
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        final settings = PlatformSettingsModel.fromJson(body['data'] as Map<String, dynamic>);
+        return {
+          'success': true,
+          'data': settings,
+          'message': body['message'] ?? 'تم تحديث إعدادات المنصة بنجاح',
+        };
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل تحديث إعدادات المنصة',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Fetches notifications for current user tenant + broadcast notifications
+  static Future<Map<String, dynamic>> getNotifications() async {
+    final uri = Uri.parse('$baseUrl/api/v1/notifications');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] is List ? body['data'] : [];
+        final notifications = list
+            .map((item) => AppNotificationModel.fromJson(item as Map<String, dynamic>))
+            .toList();
+        final unreadCount = body['unreadCount'] is int
+            ? body['unreadCount'] as int
+            : notifications.where((n) => !n.isRead).length;
+        return {
+          'success': true,
+          'data': notifications,
+          'unreadCount': unreadCount,
+        };
+      }
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل جلب الإشعارات',
+      };
+    } catch (e) {
+      return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Marks a specific notification as read
+  static Future<bool> markNotificationRead(String notificationId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/notifications/$notificationId/read');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true), body: '{}')
+          .timeout(timeoutDuration);
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        return decoded is Map<String, dynamic> && decoded['success'] == true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Sends a manual notification or broadcast (Super Admin Only)
+  static Future<Map<String, dynamic>> sendAdminNotification({
+    required String title,
+    required String body,
+    String? tenantId,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/notifications');
+    final payload = <String, dynamic>{
+      'title': title,
+      'body': body,
+      if (tenantId != null && tenantId.isNotEmpty) 'tenantId': tenantId,
+    };
+
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> resBody = decoded is Map<String, dynamic> ? decoded : {};
+      if (response.statusCode == 201 && resBody['success'] == true) {
+        return {
+          'success': true,
+          'data': resBody['data'],
+          'message': resBody['message'] ?? 'تم إرسال الإشعار بنجاح',
+        };
+      }
+      return {
+        'success': false,
+        'errorCode': resBody['errorCode'] ?? 'OPERATION_FAILED',
+        'errorMessage': resBody['errorMessage'] ?? resBody['message'] ?? 'فشل إرسال الإشعار',
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};

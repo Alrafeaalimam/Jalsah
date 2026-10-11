@@ -11,9 +11,17 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_colors.dart';
 import '../widgets/pressable_neumorphic_card.dart';
+import '../services/app_settings.dart';
 
 const String kSupportPhone1 = '0115715672';
 const String kSupportPhone2 = '0115715651';
+
+/// Returns dynamic WhatsApp numbers from AppSettings or static fallback
+List<String> getSupportWhatsAppNumbers() {
+  final nums = AppSettings.instance.whatsappNumbers;
+  if (nums.isNotEmpty) return nums;
+  return const [kSupportPhone1, kSupportPhone2];
+}
 
 /// Formats a Sudanese phone number into the international wa.me format.
 /// e.g. "0115715672" -> "249115715672"
@@ -151,24 +159,41 @@ Widget buildWhatsAppSupportCard({
           ],
         ),
         const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: _buildPhoneButton(
-                context: context,
-                phone: kSupportPhone1,
-                label: 'الرقم الأول',
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildPhoneButton(
-                context: context,
-                phone: kSupportPhone2,
-                label: 'الرقم الثاني',
-              ),
-            ),
-          ],
+        Builder(
+          builder: (context) {
+            final numbers = getSupportWhatsAppNumbers();
+            if (numbers.length <= 2) {
+              return Row(
+                children: [
+                  for (int i = 0; i < numbers.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildPhoneButton(
+                        context: context,
+                        phone: numbers[i],
+                        label: i == 0 ? 'الرقم الأول' : 'الرقم الثاني',
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            }
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (int i = 0; i < numbers.length; i++)
+                  SizedBox(
+                    width: 150,
+                    child: _buildPhoneButton(
+                      context: context,
+                      phone: numbers[i],
+                      label: 'رقم الدعم ${i + 1}',
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ],
     ),
@@ -184,7 +209,8 @@ Widget _buildPhoneButton({
     onTap: () => launchWhatsApp(
       context,
       phone,
-      initialText: 'السلام عليكم، أحتاج مساعدة بخصوص نظام إدارة شبكات المايكروتك (جلسة).',
+      initialText:
+          'السلام عليكم، أحتاج مساعدة بخصوص نظام إدارة شبكات المايكروتك (${AppSettings.instance.appName}).',
     ),
     borderRadius: BorderRadius.circular(14),
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),

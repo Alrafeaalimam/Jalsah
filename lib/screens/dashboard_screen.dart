@@ -25,6 +25,8 @@ import 'sales_report_screen.dart';
 import 'staff_screen.dart';
 import 'temp_login_screen.dart';
 import 'user_profile_screen.dart';
+import 'notifications_screen.dart';
+import '../services/app_settings.dart';
 import '../utils/whatsapp_helper.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -48,6 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoadingSales = true;
   bool _isRedirectingToLogin = false;
   SubscriptionStatusModel? _subscriptionStatus;
+  int _unreadNotificationsCount = 0;
 
   void _handleUnauthorized() {
     if (!mounted || _isRedirectingToLogin) return;
@@ -67,6 +70,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadRouters();
     _loadTodaySales();
     _loadSubscriptionStatus();
+    _loadNotificationsCount();
+  }
+
+  Future<void> _loadNotificationsCount() async {
+    try {
+      final result = await ApiClient.getNotifications();
+      if (!mounted) return;
+      if (result['success'] == true) {
+        setState(() {
+          _unreadNotificationsCount = result['unreadCount'] as int? ?? 0;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadSubscriptionStatus() async {
@@ -735,6 +751,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    int? badgeCount,
   }) {
     return Expanded(
       child: InkWell(
@@ -754,7 +771,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: Colors.white, size: 15),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon, color: Colors.white, size: 15),
+                  if (badgeCount != null && badgeCount > 0)
+                    Positioned(
+                      top: -6,
+                      right: -7,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentYellow,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 14,
+                          minHeight: 14,
+                        ),
+                        child: Text(
+                          badgeCount > 9 ? '9+' : '$badgeCount',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.cairo(
+                            color: AppColors.textDark,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
@@ -964,35 +1012,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   _buildBannerNavButton(
                     icon: Icons.notifications_none_rounded,
                     label: 'الإشعارات',
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          backgroundColor: AppColors.heroGradientStart,
-                          behavior: SnackBarBehavior.floating,
-                          duration: const Duration(seconds: 2),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          content: Row(
-                            children: [
-                              const Icon(
-                                Icons.notifications_active_outlined,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                'لا توجد تنبيهات جديدة في النظام',
-                                style: GoogleFonts.cairo(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
+                    badgeCount: _unreadNotificationsCount,
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const NotificationsScreen(),
                         ),
                       );
+                      _loadNotificationsCount();
                     },
                   ),
                 ],

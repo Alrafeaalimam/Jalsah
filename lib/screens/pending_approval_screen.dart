@@ -15,6 +15,7 @@ import '../widgets/pressable_neumorphic_card.dart';
 import 'admin/super_admin_dashboard.dart';
 import 'dashboard_screen.dart';
 import 'temp_login_screen.dart';
+import '../services/app_settings.dart';
 import '../utils/whatsapp_helper.dart';
 
 class PendingApprovalScreen extends StatefulWidget {
@@ -340,7 +341,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'لأي استفسار: jalsahnetwork@gmail.com',
+                                'لأي استفسار: ${AppSettings.instance.supportEmail}',
                                 style: GoogleFonts.cairo(
                                   fontSize: 12,
                                   color: AppColors.heroGradientStart,

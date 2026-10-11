@@ -14,11 +14,13 @@ import 'screens/splash_video_screen.dart';
 import 'screens/temp_login_screen.dart';
 import 'screens/admin/super_admin_dashboard.dart';
 import 'services/api_client.dart';
+import 'services/app_settings.dart';
 import 'theme/app_colors.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final savedToken = await ApiClient.loadSavedToken();
+  await AppSettings.instance.loadSettings();
   runApp(MikrotikCardsApp(initialToken: savedToken));
 }
 

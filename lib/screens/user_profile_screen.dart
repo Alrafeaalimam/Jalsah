@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../services/api_client.dart';
+import '../services/app_settings.dart';
 import '../theme/app_colors.dart';
 import '../utils/whatsapp_helper.dart';
 import '../widgets/pressable_neumorphic_card.dart';
@@ -223,10 +224,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       // WhatsApp Support Card
                       buildWhatsAppSupportCard(
                         context: context,
-                        title: 'الدعم الفني والمساعدة (جلسة)',
+                        title: 'الدعم الفني والمساعدة (${AppSettings.instance.appName})',
                         subtitle: 'هل تحتاج مساعدة في إدارة شبكتك أو بطاقاتك؟',
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 10),
+                      Center(
+                        child: Text(
+                          'البريد الإلكتروني للدعم: ${AppSettings.instance.supportEmail}',
+                          style: GoogleFonts.cairo(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
 
                       // Logout Button
                       PressableNeumorphicCard(

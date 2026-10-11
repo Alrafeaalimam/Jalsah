@@ -165,6 +165,13 @@ void main() {
             'data': {'todayTotal': 0.0, 'totalAmount': 0.0},
           }, 200);
         }
+        if (request.url.path.contains('notifications')) {
+          return utf8Response({
+            'success': true,
+            'data': [],
+            'unreadCount': 0,
+          }, 200);
+        }
         routerRequestCount++;
         if (routerRequestCount == 1) {
           return utf8Response({
