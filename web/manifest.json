@@ -1,11 +1,11 @@
 {
-    "name": "mikrotik_cards_app",
-    "short_name": "mikrotik_cards_app",
+    "name": "Jalsah",
+    "short_name": "Jalsah",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1E1548",
+    "theme_color": "#2E2370",
+    "description": "منظومة إدارة شبكات وكروت مايكروتك التجارية - جلسة Jalsah Hotspot Platform",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

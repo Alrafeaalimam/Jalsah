@@ -40,6 +40,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _selectedCardIds = {};
   bool _isSubmittingSale = false;
+  bool _isExportingPdf = false;
   Map<String, PackageModel> _packagesMap = {};
 
   static const List<Map<String, String>> _statusFilters = [
@@ -397,53 +398,14 @@ class _CardsListScreenState extends State<CardsListScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // Quick Action: Generate Cards
-                  InkWell(
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const GenerateCardsScreen(),
-                        ),
-                      );
-                      _loadCards();
-                    },
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.accentYellow,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.accentYellow.withValues(alpha: 0.4),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.add_rounded,
-                            size: 16,
-                            color: AppColors.textDark,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'توليد كروت',
-                            style: GoogleFonts.cairo(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textDark,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  // Actions: Export PDF & Generate Cards
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildExportPdfButton(),
+                      const SizedBox(width: 6),
+                      _buildGenerateCardsButton(),
+                    ],
                   ),
                 ],
               ),
@@ -577,6 +539,214 @@ class _CardsListScreenState extends State<CardsListScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showEmptyExportPdfMessage() {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: AppColors.heroGradientStart,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Row(
+          children: [
+            const Icon(
+              Icons.info_outline_rounded,
+              color: AppColors.accentYellow,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'لا توجد كروت متاحة للتصدير في هذه القائمة',
+                style: GoogleFonts.cairo(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportCurrentCardsPdf() async {
+    final cardsToExport = _filteredCards;
+    if (cardsToExport.isEmpty) {
+      _showEmptyExportPdfMessage();
+      return;
+    }
+
+    setState(() {
+      _isExportingPdf = true;
+    });
+
+    try {
+      if (_packagesMap.isEmpty) {
+        try {
+          final pkgRes = await ApiClient.getPackages();
+          if (mounted && pkgRes['success'] == true) {
+            final pkgs = (pkgRes['data'] as List<dynamic>).cast<PackageModel>();
+            _packagesMap = {for (final p in pkgs) p.id: p};
+          }
+        } catch (_) {}
+      }
+
+      final activeBatchName = widget.initialBatchId != null
+          ? 'batch-${widget.initialBatchId}'
+          : 'status-$_selectedStatus';
+
+      await CardPdfService.shareBatchCardsPdf(
+        cards: cardsToExport,
+        packagesMap: _packagesMap,
+        batchNumber: activeBatchName,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Text(
+              'تعذر تصدير ملف PDF: $e',
+              style: GoogleFonts.cairo(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExportingPdf = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildExportPdfButton() {
+    final bool isEmpty = _filteredCards.isEmpty;
+    final bool isDisabled = isEmpty || _isExportingPdf;
+
+    return Tooltip(
+      message: isEmpty
+          ? 'القائمة فارغة، لا توجد كروت للتصدير'
+          : 'تصدير كل الكروت المعروضة كملف PDF',
+      child: InkWell(
+        key: const Key('export_pdf_button'),
+        onTap: isDisabled
+            ? () {
+                if (isEmpty) {
+                  _showEmptyExportPdfMessage();
+                }
+              }
+            : _exportCurrentCardsPdf,
+        borderRadius: BorderRadius.circular(14),
+        child: Opacity(
+          opacity: isDisabled ? 0.45 : 1.0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 7,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.25),
+                width: 1.2,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_isExportingPdf)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  const Icon(
+                    Icons.picture_as_pdf_rounded,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                const SizedBox(width: 4),
+                Text(
+                  _isExportingPdf ? 'جارٍ التصدير...' : 'تصدير PDF',
+                  style: GoogleFonts.cairo(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGenerateCardsButton() {
+    return InkWell(
+      key: const Key('generate_cards_button'),
+      onTap: () async {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => const GenerateCardsScreen(),
+          ),
+        );
+        _loadCards();
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: 7,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.accentYellow,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.accentYellow.withValues(alpha: 0.4),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.add_rounded,
+              size: 16,
+              color: AppColors.textDark,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'توليد كروت',
+              style: GoogleFonts.cairo(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textDark,
+              ),
+            ),
+          ],
         ),
       ),
     );

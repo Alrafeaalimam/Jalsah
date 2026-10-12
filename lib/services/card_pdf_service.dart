@@ -43,6 +43,7 @@ class CardPdfService {
   static Future<pw.Document> generateCardsDocument({
     required List<CardModel> cards,
     PackageModel? package,
+    Map<String, PackageModel>? packagesMap,
     String? batchNumber,
   }) async {
     await _loadFonts();
@@ -61,7 +62,25 @@ class CardPdfService {
     );
 
     const int cardsPerPage = 6; // 2 columns x 3 rows per A4 page
-    final int totalPages = (cards.length / cardsPerPage).ceil();
+    final int totalPages = cards.isEmpty ? 1 : (cards.length / cardsPerPage).ceil();
+
+    if (cards.isEmpty) {
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(20),
+          build: (pw.Context context) {
+            return pw.Center(
+              child: pw.Text(
+                'لا توجد كروت متاحة للتصدير',
+                style: const pw.TextStyle(fontSize: 16),
+              ),
+            );
+          },
+        ),
+      );
+      return doc;
+    }
 
     for (int pageIndex = 0; pageIndex < totalPages; pageIndex++) {
       final startIndex = pageIndex * cardsPerPage;
@@ -115,11 +134,14 @@ class CardPdfService {
                     spacing: 12,
                     runSpacing: 12,
                     children: pageCards.map((card) {
+                      final cardPkg = (packagesMap != null && card.packageId != null)
+                          ? packagesMap[card.packageId]
+                          : package;
                       return pw.SizedBox(
                         width: 268,
                         child: _buildVoucherPdfWidget(
                           card: card,
-                          package: package,
+                          package: cardPkg,
                         ),
                       );
                     }).toList(),
@@ -346,11 +368,13 @@ class CardPdfService {
   static Future<void> shareBatchCardsPdf({
     required List<CardModel> cards,
     PackageModel? package,
+    Map<String, PackageModel>? packagesMap,
     String? batchNumber,
   }) async {
     final doc = await generateCardsDocument(
       cards: cards,
       package: package,
+      packagesMap: packagesMap,
       batchNumber: batchNumber,
     );
 
@@ -388,6 +412,7 @@ class CardPdfService {
   static Future<void> printBatchCardsPdf({
     required List<CardModel> cards,
     PackageModel? package,
+    Map<String, PackageModel>? packagesMap,
     String? batchNumber,
   }) async {
     await Printing.layoutPdf(
@@ -395,6 +420,7 @@ class CardPdfService {
         final doc = await generateCardsDocument(
           cards: cards,
           package: package,
+          packagesMap: packagesMap,
           batchNumber: batchNumber,
         );
         return doc.save();
