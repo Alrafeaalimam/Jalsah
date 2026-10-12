@@ -5,6 +5,7 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/app_colors.dart';
@@ -22,6 +23,7 @@ class NeumorphicTextField extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final FormFieldValidator<String>? validator;
   final TextDirection? textDirection;
+  final List<TextInputFormatter>? inputFormatters;
 
   const NeumorphicTextField({
     super.key,
@@ -37,6 +39,7 @@ class NeumorphicTextField extends StatefulWidget {
     this.onChanged,
     this.validator,
     this.textDirection,
+    this.inputFormatters,
   });
 
   @override
@@ -116,6 +119,7 @@ class _NeumorphicTextFieldState extends State<NeumorphicTextField> {
               controller: widget.controller,
               obscureText: widget.isPassword && _obscureText,
               keyboardType: widget.keyboardType,
+              inputFormatters: widget.inputFormatters,
               textInputAction: widget.textInputAction,
               enabled: widget.enabled,
               onChanged: widget.onChanged,

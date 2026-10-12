@@ -21,6 +21,7 @@ import 'package:mikrotik_cards_app/screens/user_profile_screen.dart';
 import 'package:mikrotik_cards_app/utils/whatsapp_helper.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
 import 'package:mikrotik_cards_app/widgets/pressable_neumorphic_card.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 http.Response utf8Response(Map<String, dynamic> data, int statusCode) {
   return http.Response.bytes(
@@ -34,6 +35,7 @@ void main() {
   setUpAll(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
     GoogleFonts.config.allowRuntimeFetching = false;
+    SharedPreferences.setMockInitialValues({});
 
     try {
       final fontLoaderCairo = FontLoader('Cairo');

@@ -67,10 +67,53 @@ class ApiClient {
     _authToken = token;
   }
 
+  static const String deviceFingerprintStorageKey = 'device_fingerprint';
+  static String? _cachedDeviceFingerprint;
+
+  /// Returns a persistent unique device fingerprint stored in SharedPreferences.
+  /// If not present, generates a persistent identifier and saves it.
+  static Future<String> getDeviceFingerprint() async {
+    if (_cachedDeviceFingerprint != null && _cachedDeviceFingerprint!.isNotEmpty) {
+      return _cachedDeviceFingerprint!;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(milliseconds: 300),
+      );
+      String? stored = prefs.getString(deviceFingerprintStorageKey);
+      if (stored == null || stored.isEmpty) {
+        final now = DateTime.now().microsecondsSinceEpoch;
+        final rand = (100000 + (DateTime.now().millisecond * 899)).toString();
+        stored = 'dev_${now}_$rand';
+        await prefs.setString(deviceFingerprintStorageKey, stored);
+      }
+      _cachedDeviceFingerprint = stored;
+      return stored;
+    } catch (_) {
+      _cachedDeviceFingerprint ??= 'dev_local_${DateTime.now().millisecondsSinceEpoch}';
+      return _cachedDeviceFingerprint!;
+    }
+  }
+
+  /// Sets or overrides the device fingerprint in memory (useful in testing).
+  static void setDeviceFingerprint(String? fingerprint) {
+    _cachedDeviceFingerprint = fingerprint;
+  }
+
+  /// Returns a human-friendly device label for audit logs and verification notifications.
+  static String getDeviceLabel() {
+    try {
+      return 'تطبيق جلسة (${Platform.operatingSystem})';
+    } catch (_) {
+      return 'متصفح الويب (Web Client)';
+    }
+  }
+
   /// Resets client and active in-memory token (useful between test cases).
   static void resetClient() {
     client = http.Client();
     _authToken = null;
+    _cachedDeviceFingerprint = null;
   }
 
   /// Builds standard request headers with Authorization Bearer token injected if present.
@@ -115,13 +158,19 @@ class ApiClient {
     required String username,
     String? identifier,
     required String password,
+    String? deviceFingerprint,
+    String? deviceLabel,
   }) async {
     final effectiveIdentifier = (identifier ?? username).trim();
+    final fingerprint = deviceFingerprint ?? await getDeviceFingerprint();
+    final label = deviceLabel ?? getDeviceLabel();
     final uri = Uri.parse('$baseUrl/api/v1/auth/login');
     final payload = jsonEncode({
       'identifier': effectiveIdentifier,
       'username': effectiveIdentifier,
       'password': password,
+      'deviceFingerprint': fingerprint,
+      'deviceLabel': label,
     });
 
     try {
@@ -142,6 +191,21 @@ class ApiClient {
 
       if (response.statusCode == 200 && body['success'] == true) {
         final data = body['data'] as Map<String, dynamic>;
+        final requiresDeviceVerification = data['requiresDeviceVerification'] == true;
+
+        if (requiresDeviceVerification) {
+          return {
+            'success': true,
+            'requiresDeviceVerification': true,
+            'tempToken': data['tempToken'] as String?,
+            'emailMasked': data['emailMasked'] as String?,
+            'deviceFingerprint': fingerprint,
+            'deviceLabel': label,
+            'message': data['message'] as String? ?? 'تم إرسال كود تحقق لبريدك لأن هذا جهاز جديد',
+            'data': data,
+          };
+        }
+
         final token = data['token'] as String?;
         if (token != null && token.isNotEmpty) {
           _authToken = token;
@@ -195,6 +259,82 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء تسجيل الدخول: $e',
+      };
+    }
+  }
+
+  /// Verifies the OTP sent via email for new device login.
+  /// On success, stores the full JWT token in memory & SharedPreferences.
+  static Future<Map<String, dynamic>> verifyDeviceOtp({
+    required String tempToken,
+    required String otpCode,
+    String? deviceFingerprint,
+    String? deviceLabel,
+  }) async {
+    final fingerprint = deviceFingerprint ?? await getDeviceFingerprint();
+    final label = deviceLabel ?? getDeviceLabel();
+    final uri = Uri.parse('$baseUrl/api/v1/auth/verify-device-otp');
+    final payload = jsonEncode({
+      'tempToken': tempToken,
+      'otpCode': otpCode,
+      'deviceFingerprint': fingerprint,
+      'deviceLabel': label,
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: payload,
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final data = body['data'] as Map<String, dynamic>;
+        final token = data['token'] as String?;
+        if (token != null && token.isNotEmpty) {
+          _authToken = token;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(tokenStorageKey, token);
+          } catch (_) {}
+        }
+        return {
+          'success': true,
+          'data': data,
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'INVALID_OR_EXPIRED_OTP',
+          'errorMessage': body['errorMessage'] ?? 'كود التحقق غير صحيح أو انتهت صلاحيته',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ أثناء تأكيد الجهاز: $e',
       };
     }
   }

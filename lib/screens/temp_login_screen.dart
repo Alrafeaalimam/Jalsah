@@ -18,6 +18,7 @@ import 'register_screen.dart';
 import 'forgot_password_screen.dart';
 import 'admin/super_admin_dashboard.dart';
 import 'pending_approval_screen.dart';
+import 'verify_device_otp_screen.dart';
 
 class TempLoginScreen extends StatefulWidget {
   const TempLoginScreen({super.key});
@@ -64,6 +65,30 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
     if (!mounted) return;
 
     if (result['success'] == true) {
+      if (result['requiresDeviceVerification'] == true) {
+        setState(() {
+          _isLoading = false;
+        });
+        final tempToken = result['tempToken'] as String? ?? result['data']?['tempToken'] as String;
+        final fingerprint = result['deviceFingerprint'] as String? ?? await ApiClient.getDeviceFingerprint();
+        final label = result['deviceLabel'] as String? ?? ApiClient.getDeviceLabel();
+        final masked = result['emailMasked'] as String? ?? result['data']?['emailMasked'] as String?;
+
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => VerifyDeviceOtpScreen(
+              tempToken: tempToken,
+              deviceFingerprint: fingerprint,
+              deviceLabel: label,
+              emailMasked: masked,
+              username: username,
+            ),
+          ),
+        );
+        return;
+      }
+
       setState(() {
         _isLoading = false;
       });
