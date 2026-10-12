@@ -1,12 +1,13 @@
 import os
 import re
 import sys
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 class RangeRequestHandler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header('Accept-Ranges', 'bytes')
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         super().end_headers()
 
     def send_head(self):
@@ -69,6 +70,6 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     directory = sys.argv[2] if len(sys.argv) > 2 else 'build/web'
     os.chdir(directory)
-    server = HTTPServer(('0.0.0.0', port), RangeRequestHandler)
+    server = ThreadingHTTPServer(('0.0.0.0', port), RangeRequestHandler)
     print(f'Serving {directory} on http://0.0.0.0:{port} with HTTP Range support')
     server.serve_forever()

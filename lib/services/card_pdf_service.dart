@@ -6,14 +6,14 @@
 // ============================================================================
 
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../models/card_model.dart';
 import '../models/package_model.dart';
+import '../utils/web_pdf_export.dart';
 
 class CardPdfService {
   static pw.Font? _arabicFont;
@@ -382,10 +382,26 @@ class CardPdfService {
     final filename =
         'jalsah-batch-${batchNumber ?? DateTime.now().millisecondsSinceEpoch}.pdf';
 
-    await Printing.sharePdf(
-      bytes: pdfBytes,
-      filename: filename,
-    );
+    if (kIsWeb) {
+      final downloaded = await downloadPdfOnWeb(pdfBytes, filename);
+      if (downloaded) return;
+    }
+
+    try {
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename: filename,
+      );
+    } catch (e) {
+      if (kIsWeb) {
+        await Printing.layoutPdf(
+          onLayout: (format) async => pdfBytes,
+          name: filename,
+        );
+      } else {
+        rethrow;
+      }
+    }
   }
 
   /// Exports and triggers the system share/print dialog for a single card.
@@ -402,10 +418,26 @@ class CardPdfService {
     final Uint8List pdfBytes = await doc.save();
     final filename = 'jalsah-card-${card.username}.pdf';
 
-    await Printing.sharePdf(
-      bytes: pdfBytes,
-      filename: filename,
-    );
+    if (kIsWeb) {
+      final downloaded = await downloadPdfOnWeb(pdfBytes, filename);
+      if (downloaded) return;
+    }
+
+    try {
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename: filename,
+      );
+    } catch (e) {
+      if (kIsWeb) {
+        await Printing.layoutPdf(
+          onLayout: (format) async => pdfBytes,
+          name: filename,
+        );
+      } else {
+        rethrow;
+      }
+    }
   }
 
   /// Direct print layout for batch cards using standard Android printing preview.
@@ -415,6 +447,7 @@ class CardPdfService {
     Map<String, PackageModel>? packagesMap,
     String? batchNumber,
   }) async {
+    ensureWebPrintingInitialized();
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async {
         final doc = await generateCardsDocument(
@@ -434,6 +467,7 @@ class CardPdfService {
     required CardModel card,
     PackageModel? package,
   }) async {
+    ensureWebPrintingInitialized();
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async {
         final doc = await generateCardsDocument(

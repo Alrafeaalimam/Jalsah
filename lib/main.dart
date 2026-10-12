@@ -17,8 +17,11 @@ import 'services/api_client.dart';
 import 'services/app_settings.dart';
 import 'theme/app_colors.dart';
 
+import 'utils/web_pdf_export.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ensureWebPrintingInitialized();
   final savedToken = await ApiClient.loadSavedToken();
   await AppSettings.instance.loadSettings();
   runApp(MikrotikCardsApp(initialToken: savedToken));
