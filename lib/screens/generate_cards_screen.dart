@@ -339,11 +339,13 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         gradient: LinearGradient(
           colors: [
             AppColors.heroGradientStart,
+            AppColors.heroGradientMiddle,
             AppColors.heroGradientEnd,
           ],
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
         ),
+
         borderRadius: BorderRadius.vertical(
           bottom: Radius.circular(28),
         ),

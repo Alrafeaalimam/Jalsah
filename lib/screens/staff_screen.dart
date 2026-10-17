@@ -680,11 +680,13 @@ class _StaffScreenState extends State<StaffScreen> {
         gradient: LinearGradient(
           colors: [
             AppColors.heroGradientStart,
+            AppColors.heroGradientMiddle,
             AppColors.heroGradientEnd,
           ],
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
         ),
+
         borderRadius: BorderRadius.vertical(
           bottom: Radius.circular(24),
         ),

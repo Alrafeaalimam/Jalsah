@@ -6,7 +6,6 @@
 // ============================================================================
 
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/onboarding_screen.dart';
@@ -15,15 +14,22 @@ import 'screens/temp_login_screen.dart';
 import 'screens/admin/super_admin_dashboard.dart';
 import 'services/api_client.dart';
 import 'services/app_settings.dart';
-import 'theme/app_colors.dart';
+import 'theme/app_theme.dart';
 
 import 'utils/web_pdf_export.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ensureWebPrintingInitialized();
-  final savedToken = await ApiClient.loadSavedToken();
-  await AppSettings.instance.loadSettings();
+  String? savedToken;
+  try {
+    savedToken = await ApiClient.loadSavedToken().timeout(
+      const Duration(seconds: 1),
+      onTimeout: () => null,
+    );
+  } catch (_) {}
+  // Load dynamic settings in the background so app startup is instantaneous
+  AppSettings.instance.loadSettings();
   runApp(MikrotikCardsApp(initialToken: savedToken));
 }
 
@@ -65,17 +71,7 @@ class MikrotikCardsApp extends StatelessWidget {
     return MaterialApp(
       title: 'Jalsah | جلسة',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.pageBg,
-        textTheme: GoogleFonts.cairoTextTheme(),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.heroGradientStart,
-          primary: AppColors.heroGradientStart,
-          secondary: AppColors.accentYellow,
-          surface: AppColors.pageBg,
-        ),
-      ),
+      theme: AppTheme.lightTheme,
       home: homeScreen,
     );
   }

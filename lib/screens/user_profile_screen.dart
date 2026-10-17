@@ -224,7 +224,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       // WhatsApp Support Card
                       buildWhatsAppSupportCard(
                         context: context,
-                        title: 'الدعم الفني والمساعدة (${AppSettings.instance.appName})',
+                        title: 'الدعم الفني والمساعدة',
+                        englishTag: AppSettings.instance.appName.contains(RegExp(r'[a-zA-Z]'))
+                            ? AppSettings.instance.appName
+                            : 'Jalsah',
                         subtitle: 'هل تحتاج مساعدة في إدارة شبكتك أو بطاقاتك؟',
                       ),
                       const SizedBox(height: 10),
@@ -283,16 +286,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [AppColors.heroGradientStart, AppColors.heroGradientEnd],
+          colors: [
+            AppColors.heroGradientStart,
+            AppColors.heroGradientMiddle,
+            AppColors.heroGradientEnd,
+          ],
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
         ),
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: AppColors.heroGradientStart.withValues(alpha: 0.35),
-            offset: const Offset(0, 8),
-            blurRadius: 16,
+            color: AppColors.heroGradientStart.withValues(alpha: 0.16),
+            offset: const Offset(0, 5),
+            blurRadius: 12,
+            spreadRadius: 0,
           ),
         ],
       ),
@@ -323,6 +331,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             _fullName.isNotEmpty ? _fullName : _username,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: GoogleFonts.cairo(
               fontSize: 18,
               fontWeight: FontWeight.w800,
@@ -370,10 +379,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             'بيانات الحساب',
+            textAlign: TextAlign.right,
             style: GoogleFonts.cairo(
               fontSize: 15,
               fontWeight: FontWeight.w800,
@@ -423,34 +433,43 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     Color? valueColor,
   }) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          padding: const EdgeInsets.all(8),
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
             color: AppColors.heroGradientStart.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(
-            icon,
-            size: 18,
-            color: AppColors.heroGradientStart,
+          child: Center(
+            child: Icon(
+              icon,
+              size: 18,
+              color: AppColors.heroGradientStart,
+            ),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
                 label,
+                textAlign: TextAlign.right,
                 style: GoogleFonts.cairo(
                   fontSize: 11.5,
                   color: AppColors.textMuted,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+              const SizedBox(height: 1),
               Text(
                 value,
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: GoogleFonts.cairo(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,

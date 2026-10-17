@@ -13,6 +13,10 @@ import '../models/router_model.dart';
 import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_empty_state.dart';
+import '../widgets/app_error_state.dart';
+import '../widgets/app_loading_state.dart';
 import '../widgets/count_up_text.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
@@ -543,198 +547,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildStateContent() {
     // 1. Loading State
     if (_isLoading) {
-      return Container(
-        height: 240,
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 36,
-              height: 36,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: AppColors.heroGradientStart,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'جارٍ جلب بيانات الراوترات...',
-              style: GoogleFonts.cairo(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textMuted,
-              ),
-            ),
-          ],
-        ),
+      return const AppLoadingState(
+        message: 'جارٍ جلب بيانات الراوترات...',
       );
     }
 
     // 2. Error State
     if (_errorMessage != null) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 20),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.pageBg,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            const BoxShadow(
-              color: AppColors.shadowLight,
-              offset: Offset(-4, -4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: AppColors.shadowDark.withValues(alpha: 0.7),
-              offset: const Offset(4, 4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            const Icon(
-              Icons.cloud_off_rounded,
-              size: 48,
-              color: AppColors.statusOffline,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'فشل الاتصال بالخادم',
-              style: GoogleFonts.cairo(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _errorMessage!,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.cairo(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textMuted,
-              ),
-            ),
-            const SizedBox(height: 18),
-            PressableNeumorphicCard(
-              onTap: _loadRouters,
-              borderRadius: BorderRadius.circular(14),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.refresh_rounded,
-                    size: 18,
-                    color: AppColors.heroGradientStart,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'إعادة المحاولة',
-                    style: GoogleFonts.cairo(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.heroGradientStart,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return AppErrorState(
+        title: 'فشل الاتصال بالخادم',
+        errorMessage: _errorMessage!,
+        onRetry: _loadRouters,
       );
     }
 
     // 3. Empty State
     if (_routers.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 20),
-        padding: const EdgeInsets.all(28),
-        decoration: BoxDecoration(
-          color: AppColors.pageBg,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            const BoxShadow(
-              color: AppColors.shadowLight,
-              offset: Offset(-4, -4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: AppColors.shadowDark.withValues(alpha: 0.7),
-              offset: const Offset(4, 4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.heroGradientStart.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.router_outlined,
-                size: 32,
-                color: AppColors.heroGradientStart,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'لا توجد راوترات مسجلة بعد',
-              style: GoogleFonts.cairo(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'ابدأ بإضافة أول راوتر مايكروتك للتحكم به وإدارة كروت الهوتسبوت.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.cairo(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textMuted,
-              ),
-            ),
-            const SizedBox(height: 20),
-            PressableNeumorphicCard(
-              onTap: _navigateToAddRouter,
-              backgroundColor: AppColors.heroGradientStart,
-              borderRadius: BorderRadius.circular(14),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'إضافة راوتر',
-                    style: GoogleFonts.cairo(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return AppEmptyState(
+        icon: Icons.router_outlined,
+        title: 'لا توجد راوترات مسجلة بعد',
+        description:
+            'ابدأ بإضافة أول راوتر مايكروتك للتحكم به وإدارة كروت الهوتسبوت.',
+        actionLabel: 'إضافة راوتر',
+        actionIcon: Icons.add_circle_outline_rounded,
+        onAction: _navigateToAddRouter,
       );
     }
 
@@ -747,77 +583,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+
   Widget _buildBannerNavButton({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
     int? badgeCount,
   }) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.16),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.22),
-              width: 1,
-            ),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.25),
+            width: 1,
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(icon, color: Colors.white, size: 15),
-                  if (badgeCount != null && badgeCount > 0)
-                    Positioned(
-                      top: -6,
-                      right: -7,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: AppColors.accentYellow,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        constraints: const BoxConstraints(
-                          minWidth: 14,
-                          minHeight: 14,
-                        ),
-                        child: Text(
-                          badgeCount > 9 ? '9+' : '$badgeCount',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.cairo(
-                            color: AppColors.textDark,
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w900,
-                            height: 1.1,
-                          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(icon, color: Colors.white, size: 16),
+                if (badgeCount != null && badgeCount > 0)
+                  Positioned(
+                    top: -6,
+                    right: -7,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.accentYellow,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: const BoxConstraints(
+                        minWidth: 15,
+                        minHeight: 15,
+                      ),
+                      child: Text(
+                        badgeCount > 9 ? '9+' : '$badgeCount',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.cairo(
+                          color: AppColors.textDark,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          height: 1.1,
                         ),
                       ),
                     ),
-                ],
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.cairo(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
                   ),
-                ),
+              ],
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.cairo(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -833,6 +669,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         gradient: LinearGradient(
           colors: [
             AppColors.heroGradientStart,
+            AppColors.heroGradientMiddle,
             AppColors.heroGradientEnd,
           ],
           begin: Alignment.topRight,
@@ -852,7 +689,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -868,7 +705,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         Text(
                           'مساء الخير 👋',
                           style: GoogleFonts.cairo(
-                            fontSize: 13,
+                            fontSize: 12.5,
                             fontWeight: FontWeight.w500,
                             color: Colors.white.withValues(alpha: 0.85),
                           ),
@@ -878,7 +715,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: GoogleFonts.cairo(
-                            fontSize: 18,
+                            fontSize: 17,
                             fontWeight: FontWeight.w800,
                             color: Colors.white,
                             letterSpacing: 0.2,
@@ -891,7 +728,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(20),
@@ -938,7 +775,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           },
                           borderRadius: BorderRadius.circular(20),
                           child: Container(
-                            padding: const EdgeInsets.all(6),
+                            padding: const EdgeInsets.all(5),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.2),
                               shape: BoxShape.circle,
@@ -949,7 +786,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                             child: const Icon(
                               Icons.person_rounded,
-                              size: 18,
+                              size: 17,
                               color: Colors.white,
                             ),
                           ),
@@ -959,72 +796,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // 2. Action Buttons Row (الموظفون / الترخيص / الكروت / الباقات / الإشعارات)
-              Row(
-                children: [
-                  if (ApiClient.isAdmin) ...[
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    if (ApiClient.isAdmin) ...[
+                      _buildBannerNavButton(
+                        icon: Icons.vpn_key_outlined,
+                        label: 'الترخيص',
+                        onTap: _showRedeemLicenseDialog,
+                      ),
+                      const SizedBox(width: 8),
+                      _buildBannerNavButton(
+                        icon: Icons.group_outlined,
+                        label: 'الموظفون',
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => const StaffScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     _buildBannerNavButton(
-                      icon: Icons.vpn_key_outlined,
-                      label: 'الترخيص',
-                      onTap: _showRedeemLicenseDialog,
+                      icon: Icons.credit_card_rounded,
+                      label: 'الكروت',
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const CardsListScreen(),
+                          ),
+                        );
+                        _loadTodaySales();
+                      },
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     _buildBannerNavButton(
-                      icon: Icons.group_outlined,
-                      label: 'الموظفون',
+                      icon: Icons.inventory_2_outlined,
+                      label: 'الباقات',
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (context) => const StaffScreen(),
+                            builder: (context) => const PackagesScreen(),
                           ),
                         );
                       },
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
+                    _buildBannerNavButton(
+                      icon: Icons.notifications_none_rounded,
+                      label: 'الإشعارات',
+                      badgeCount: _unreadNotificationsCount,
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const NotificationsScreen(),
+                          ),
+                        );
+                        _loadNotificationsCount();
+                      },
+                    ),
                   ],
-                  _buildBannerNavButton(
-                    icon: Icons.credit_card_rounded,
-                    label: 'الكروت',
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const CardsListScreen(),
-                        ),
-                      );
-                      _loadTodaySales();
-                    },
-                  ),
-                  const SizedBox(width: 6),
-                  _buildBannerNavButton(
-                    icon: Icons.inventory_2_outlined,
-                    label: 'الباقات',
-                    onTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const PackagesScreen(),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 6),
-                  _buildBannerNavButton(
-                    icon: Icons.notifications_none_rounded,
-                    label: 'الإشعارات',
-                    badgeCount: _unreadNotificationsCount,
-                    onTap: () async {
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const NotificationsScreen(),
-                        ),
-                      );
-                      _loadNotificationsCount();
-                    },
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
               // 3. Two Stats Cards (Real Device Status + Today's Sales)
               Row(
@@ -1034,13 +875,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
-                        vertical: 10,
+                        vertical: 9,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.14),
+                        color: Colors.white.withValues(alpha: 0.16),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.22),
+                          color: Colors.white.withValues(alpha: 0.25),
                           width: 1,
                         ),
                       ),
@@ -1060,6 +901,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         ? AppColors.statusOnline
                                         : AppColors.statusOffline,
                                     shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (onlineCount > 0
+                                                ? AppColors.statusOnline
+                                                : AppColors.statusOffline)
+                                            .withValues(alpha: 0.5),
+                                        blurRadius: 4,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 6),
@@ -1068,13 +919,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   style: GoogleFonts.cairo(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w600,
-                                    color: Colors.white.withValues(alpha: 0.9),
+                                    color: Colors.white.withValues(alpha: 0.95),
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 4),
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerRight,
@@ -1123,13 +974,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
-                          vertical: 10,
+                          vertical: 9,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.14),
+                          color: Colors.white.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.22),
+                            color: Colors.white.withValues(alpha: 0.25),
                             width: 1,
                           ),
                         ),
@@ -1144,7 +995,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     Icon(
                                       Icons.payments_outlined,
                                       size: 13,
-                                      color: Colors.white.withValues(alpha: 0.9),
+                                      color: Colors.white.withValues(alpha: 0.95),
                                     ),
                                     const SizedBox(width: 5),
                                     Text(
@@ -1152,7 +1003,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       style: GoogleFonts.cairo(
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.white.withValues(alpha: 0.9),
+                                        color: Colors.white.withValues(alpha: 0.95),
                                       ),
                                     ),
                                   ],
@@ -1160,11 +1011,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 Icon(
                                   Icons.arrow_back_ios_new_rounded,
                                   size: 10,
-                                  color: Colors.white.withValues(alpha: 0.6),
+                                  color: Colors.white.withValues(alpha: 0.7),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 4),
+
                             if (_isLoadingSales)
                               const SizedBox(
                                 height: 26,
@@ -1197,7 +1049,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     return '$formatted جنيه سوداني';
                                   },
                                   style: GoogleFonts.cairo(
-                                    fontSize: 18,
+                                    fontSize: 19,
                                     fontWeight: FontWeight.w800,
                                     color: AppColors.accentYellow,
                                   ),
@@ -1217,16 +1069,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+
   Widget _buildTrialBannerStrip(SubscriptionStatusModel status) {
     final bool isCritical = status.daysRemaining <= 2;
     final Color alertBg = isCritical
         ? const Color(0xFFEF4444).withValues(alpha: 0.12)
         : AppColors.heroGradientStart.withValues(alpha: 0.10);
     final Color alertBorder = isCritical
-        ? const Color(0xFFEF4444).withValues(alpha: 0.40)
-        : AppColors.heroGradientStart.withValues(alpha: 0.28);
+        ? const Color(0xFFEF4444).withValues(alpha: 0.38)
+        : AppColors.heroGradientStart.withValues(alpha: 0.25);
     final Color alertTextColor = isCritical
-        ? const Color(0xFFEF4444)
+        ? const Color(0xFFDC2626)
         : AppColors.heroGradientStart;
     final IconData alertIcon = isCritical
         ? Icons.warning_amber_rounded
@@ -1234,17 +1087,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       decoration: BoxDecoration(
         color: alertBg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: alertBorder, width: 1),
       ),
       child: Row(
         children: [
           Icon(
             alertIcon,
-            size: 18,
+            size: 19,
             color: alertTextColor,
           ),
           const SizedBox(width: 8),
@@ -1259,16 +1112,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: alertTextColor.withValues(alpha: 0.15),
+              color: alertTextColor.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
               'فترة تجريبية',
               style: GoogleFonts.cairo(
                 fontSize: 10.5,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 color: alertTextColor,
               ),
             ),
@@ -1276,20 +1129,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 8),
           InkWell(
             onTap: _showRedeemLicenseDialog,
+            borderRadius: BorderRadius.circular(8),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
                 color: AppColors.heroGradientStart,
                 borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   const Icon(Icons.vpn_key_rounded, size: 12, color: Colors.white),
                   const SizedBox(width: 4),
                   Text(
                     'تفعيل كود',
                     style: GoogleFonts.cairo(
-                      fontSize: 10.5,
+                      fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),
@@ -1302,6 +1164,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+
 
   void _showRedeemLicenseDialog() {
     final codeController = TextEditingController();
@@ -1698,169 +1561,173 @@ class _DashboardScreenState extends State<DashboardScreen> {
         router.boardModel != null && router.boardModel!.trim().isNotEmpty;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.only(bottom: 12),
       child: PressableNeumorphicCard(
         onTap: () => _onRouterCardTapped(router),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Column(
+        child: Row(
           children: [
-            Row(
-              children: [
-                // Status Pulsing Dot (Online green, else red)
-                PulsingDot(
-                  color: router.isOnline
-                      ? AppColors.statusOnline
-                      : AppColors.statusOffline,
-                  size: 13,
-                ),
-                const SizedBox(width: 14),
+            // Status Pulsing Dot (Online green, else red)
+            PulsingDot(
+              color: router.isOnline
+                  ? AppColors.statusOnline
+                  : AppColors.statusOffline,
+              size: 13,
+            ),
+            const SizedBox(width: 14),
 
-                // Router Details
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            // Router Details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    router.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.cairo(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
                     children: [
-                      Text(
-                        router.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.cairo(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textDark,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          if (hasBoardModel) ...[
-                            Flexible(
-                              child: Text(
-                                router.boardModel!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.cairo(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.textMuted,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 3,
-                              height: 3,
-                              decoration: const BoxDecoration(
-                                color: AppColors.textMuted,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          Flexible(
-                            child: Text(
-                              router.host,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.cairo(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                                color: AppColors.textMuted,
-                              ),
+                      if (hasBoardModel) ...[
+                        Flexible(
+                          child: Text(
+                            router.boardModel!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.cairo(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMuted,
                             ),
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Status Badge
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: router.isOnline
-                        ? AppColors.statusOnline.withValues(alpha: 0.12)
-                        : AppColors.statusOffline.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        router.isOnline
-                            ? Icons.wifi_rounded
-                            : Icons.wifi_off_rounded,
-                        size: 14,
-                        color: router.isOnline
-                            ? AppColors.statusOnline
-                            : AppColors.statusOffline,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        router.isOnline ? 'متصل' : 'غير متصل',
-                        style: GoogleFonts.cairo(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: router.isOnline
-                              ? AppColors.statusOnline
-                              : AppColors.statusOffline,
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          width: 3,
+                          height: 3,
+                          decoration: const BoxDecoration(
+                            color: AppColors.textMuted,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          router.host,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.cairo(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textMuted,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
+                ],
+              ),
+            ),
 
-                const SizedBox(width: 8),
+            const SizedBox(width: 8),
 
-                // Delete Button with confirmation dialog
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppColors.statusOffline,
-                    size: 20,
-                  ),
-                  tooltip: 'حذف الراوتر',
-                  splashRadius: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
-                  onPressed: () => _confirmDeleteRouter(router),
+            // Status Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: router.isOnline
+                    ? AppColors.statusOnline.withValues(alpha: 0.12)
+                    : AppColors.statusOffline.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: router.isOnline
+                      ? AppColors.statusOnline.withValues(alpha: 0.25)
+                      : AppColors.statusOffline.withValues(alpha: 0.20),
+                  width: 1,
                 ),
-              ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    router.isOnline
+                        ? Icons.wifi_rounded
+                        : Icons.wifi_off_rounded,
+                    size: 14,
+                    color: router.isOnline
+                        ? AppColors.statusOnline
+                        : AppColors.statusOffline,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    router.isOnline ? 'متصل' : 'غير متصل',
+                    style: GoogleFonts.cairo(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: router.isOnline
+                          ? AppColors.statusOnline
+                          : AppColors.statusOffline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
+            // Delete Button with confirmation dialog
+            IconButton(
+              icon: const Icon(
+                Icons.delete_outline_rounded,
+                color: AppColors.statusOffline,
+                size: 20,
+              ),
+              tooltip: 'حذف الراوتر',
+              splashRadius: 18,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+              onPressed: () => _confirmDeleteRouter(router),
             ),
           ],
         ),
       ),
     )
         .animate()
-        .fadeIn(delay: (index * 80).ms)
-        .slideY(begin: 0.12, duration: 250.ms);
+        .fadeIn(delay: (index * 60).ms)
+        .slideY(begin: 0.08, duration: 220.ms);
   }
+
 
   Widget _buildBottomActionBar() {
     Widget button = PressableNeumorphicCard(
       onTap: _onGenerateCardsPressed,
       backgroundColor: AppColors.accentYellow,
-      borderRadius: BorderRadius.circular(18),
-      padding: const EdgeInsets.symmetric(vertical: 16),
+      borderRadius: BorderRadius.circular(16),
+      padding: const EdgeInsets.symmetric(vertical: 13),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Icon(
             Icons.add_card_rounded,
             color: AppColors.textDark,
-            size: 22,
+            size: 21,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Text(
             'توليد كروت جديدة',
             style: GoogleFonts.cairo(
-              fontSize: 16,
+              fontSize: 15.5,
               fontWeight: FontWeight.w800,
               color: AppColors.textDark,
               letterSpacing: 0.3,
@@ -1877,17 +1744,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
       decoration: BoxDecoration(
         color: AppColors.pageBg,
         boxShadow: [
           BoxShadow(
             color: AppColors.shadowDark.withValues(alpha: 0.3),
-            offset: const Offset(0, -6),
+            offset: const Offset(0, -4),
             blurRadius: 10,
           ),
         ],
       ),
+
       child: SafeArea(
         top: false,
         child: button,

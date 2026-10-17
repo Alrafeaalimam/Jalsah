@@ -17,6 +17,7 @@ import 'package:mikrotik_cards_app/screens/cards_list_screen.dart';
 import 'package:mikrotik_cards_app/screens/sales_report_screen.dart';
 import 'package:mikrotik_cards_app/screens/splash_video_screen.dart';
 import 'package:mikrotik_cards_app/screens/dashboard_screen.dart';
+import 'package:mikrotik_cards_app/screens/user_profile_screen.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
 
 http.Response utf8Response(Map<String, dynamic> data, int statusCode) {
@@ -318,6 +319,29 @@ void main() {
       tester: tester,
       widget: const DashboardScreen(userName: 'المدير العام'),
       outputPath: 'reports/screen_dashboard.png',
+    );
+  });
+
+  testWidgets('Capture UserProfileScreen', (tester) async {
+    ApiClient.client = MockClient((request) async {
+      return utf8Response({
+        'success': true,
+        'data': {
+          'id': 'u-1',
+          'username': 'admin_boss',
+          'fullName': 'أحمد محمد علي الطيب',
+          'email': 'ahmed.boss@jalsah.sd',
+          'role': 'TENANT_ADMIN',
+          'networkName': 'شبكة النيل للألياف الضوئية',
+          'status': 'ACTIVE',
+        },
+      }, 200);
+    });
+
+    await captureWidget(
+      tester: tester,
+      widget: const UserProfileScreen(),
+      outputPath: 'reports/screen_user_profile.png',
     );
   });
 }

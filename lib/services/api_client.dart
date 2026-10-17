@@ -24,8 +24,8 @@ import '../models/platform_settings_model.dart';
 import '../models/notification_model.dart';
 
 class ApiClient {
-  static const String baseUrl = 'http://127.0.0.1:3000';
-  static const Duration timeoutDuration = Duration(seconds: 5);
+  static const String baseUrl = 'https://mikrotik-cards-backend.onrender.com';
+  static const Duration timeoutDuration = Duration(seconds: 25);
   static const String tokenStorageKey = 'auth_token';
 
   static http.Client client = http.Client();

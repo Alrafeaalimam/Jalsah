@@ -12,6 +12,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/package_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_empty_state.dart';
+import '../widgets/app_error_state.dart';
+import '../widgets/app_loading_state.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 
@@ -371,11 +374,13 @@ class _PackagesScreenState extends State<PackagesScreen> {
         gradient: LinearGradient(
           colors: [
             AppColors.heroGradientStart,
+            AppColors.heroGradientMiddle,
             AppColors.heroGradientEnd,
           ],
           begin: Alignment.topRight,
           end: Alignment.bottomLeft,
         ),
+
         borderRadius: BorderRadius.vertical(
           bottom: Radius.circular(24),
         ),
@@ -648,198 +653,29 @@ class _PackagesScreenState extends State<PackagesScreen> {
   Widget _buildStateContent() {
     // 1. Loading State
     if (_isLoading) {
-      return Container(
-        height: 240,
-        alignment: Alignment.center,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 36,
-              height: 36,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: AppColors.heroGradientStart,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'جارٍ جلب باقات الإنترنت...',
-              style: GoogleFonts.cairo(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textMuted,
-              ),
-            ),
-          ],
-        ),
+      return const AppLoadingState(
+        message: 'جارٍ جلب باقات الإنترنت...',
       );
     }
 
     // 2. Error State
     if (_errorMessage != null) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 20),
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.pageBg,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            const BoxShadow(
-              color: AppColors.shadowLight,
-              offset: Offset(-4, -4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: AppColors.shadowDark.withValues(alpha: 0.7),
-              offset: const Offset(4, 4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            const Icon(
-              Icons.cloud_off_rounded,
-              size: 48,
-              color: AppColors.statusOffline,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'فشل الاتصال بالخادم',
-              style: GoogleFonts.cairo(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _errorMessage!,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.cairo(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textMuted,
-              ),
-            ),
-            const SizedBox(height: 18),
-            PressableNeumorphicCard(
-              onTap: _loadPackages,
-              borderRadius: BorderRadius.circular(14),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.refresh_rounded,
-                    size: 18,
-                    color: AppColors.heroGradientStart,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'إعادة المحاولة',
-                    style: GoogleFonts.cairo(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.heroGradientStart,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return AppErrorState(
+        title: 'فشل الاتصال بالخادم',
+        errorMessage: _errorMessage!,
+        onRetry: _loadPackages,
       );
     }
 
     // 3. Empty State
     if (_packages.isEmpty) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 20),
-        padding: const EdgeInsets.all(28),
-        decoration: BoxDecoration(
-          color: AppColors.pageBg,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            const BoxShadow(
-              color: AppColors.shadowLight,
-              offset: Offset(-4, -4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: AppColors.shadowDark.withValues(alpha: 0.7),
-              offset: const Offset(4, 4),
-              blurRadius: 8,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: AppColors.heroGradientStart.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.inventory_2_outlined,
-                size: 32,
-                color: AppColors.heroGradientStart,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'لا توجد باقات مسجلة بعد',
-              style: GoogleFonts.cairo(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'ابدأ بإضافة باقات الإنترنت وتحديد السرعات والأسعار.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.cairo(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textMuted,
-              ),
-            ),
-            const SizedBox(height: 20),
-            PressableNeumorphicCard(
-              onTap: _openAddPackageModal,
-              backgroundColor: AppColors.heroGradientStart,
-              borderRadius: BorderRadius.circular(14),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.add_circle_outline_rounded,
-                    size: 18,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'إضافة باقة',
-                    style: GoogleFonts.cairo(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+      return AppEmptyState(
+        icon: Icons.inventory_2_outlined,
+        title: 'لا توجد باقات مسجلة بعد',
+        description: 'ابدأ بإضافة باقات الإنترنت وتحديد السرعات والأسعار.',
+        actionLabel: 'إضافة باقة',
+        actionIcon: Icons.add_circle_outline_rounded,
+        onAction: _openAddPackageModal,
       );
     }
 
@@ -851,6 +687,7 @@ class _PackagesScreenState extends State<PackagesScreen> {
       }),
     );
   }
+
 
   Widget _buildPackageCard(PackageModel package, int index) {
     return Padding(
