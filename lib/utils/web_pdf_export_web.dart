@@ -1,5 +1,6 @@
 import 'dart:js_interop';
 import 'dart:typed_data';
+// ignore: depend_on_referenced_packages
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:printing/printing_web.dart';
 import 'package:web/web.dart' as web;

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
+import 'admin/super_admin_dashboard.dart';
 import 'dashboard_screen.dart';
 import 'temp_login_screen.dart';
 
@@ -77,7 +78,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _isCompleting = true);
 
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 1),
+      );
       await prefs.setBool('has_seen_onboarding', true);
     } catch (e) {
       debugPrint('Failed to save onboarding preference: $e');
@@ -100,7 +103,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     // Check saved token to determine auth destination
     String? savedToken;
     try {
-      savedToken = await ApiClient.loadSavedToken();
+      savedToken = await ApiClient.loadSavedToken().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => null,
+      );
     } catch (e) {
       debugPrint('Error loading saved token: $e');
     }
@@ -110,11 +116,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (!mounted) return;
 
+    final Widget destination;
+    if (hasValidToken && ApiClient.isSuperAdmin) {
+      destination = const SuperAdminDashboardScreen();
+    } else if (hasValidToken) {
+      destination = const DashboardScreen();
+    } else {
+      destination = const TempLoginScreen();
+    }
+
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) =>
-            hasValidToken ? const DashboardScreen() : const TempLoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => destination),
     );
   }
 

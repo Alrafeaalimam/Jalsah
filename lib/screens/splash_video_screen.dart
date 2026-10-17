@@ -14,6 +14,7 @@ import 'package:video_player/video_player.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
 import '../utils/web_video_init.dart';
+import 'admin/super_admin_dashboard.dart';
 import 'dashboard_screen.dart';
 import 'onboarding_screen.dart';
 import 'temp_login_screen.dart';
@@ -80,7 +81,7 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
 
       // ignore: avoid_print
       print('SPLASH_INIT: Controller created, calling initialize()');
-      await _controller!.initialize();
+      await _controller!.initialize().timeout(const Duration(seconds: 4));
       // ignore: avoid_print
       print('SPLASH_INIT: initialize() succeeded! duration=${_controller!.value.duration}, size=${_controller!.value.size}');
       if (!mounted) return;
@@ -96,6 +97,18 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
       }
 
       setState(() {});
+
+      final videoDuration = _controller!.value.duration;
+      final maxWait = (videoDuration > Duration.zero &&
+              videoDuration < const Duration(seconds: 10))
+          ? videoDuration + const Duration(seconds: 2)
+          : const Duration(seconds: 6);
+      _fallbackTimer?.cancel();
+      _fallbackTimer = Timer(maxWait, () {
+        if (mounted && !_hasNavigated) {
+          _navigateToNextScreen();
+        }
+      });
 
       try {
         await _controller!.play();
@@ -114,6 +127,7 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
           _canSkip = true;
         });
       }
+      _fallbackTimer?.cancel();
       _fallbackTimer = Timer(const Duration(seconds: 3), () {
         if (mounted && !_hasNavigated) {
           _navigateToNextScreen();
@@ -126,7 +140,9 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
     if (!mounted || _hasNavigated) return;
     final value = _controller?.value;
     if (value != null && value.isInitialized) {
-      if (value.position >= value.duration && value.duration > Duration.zero) {
+      if (value.hasError ||
+          value.isCompleted ||
+          (value.position >= value.duration && value.duration > Duration.zero)) {
         _navigateToNextScreen();
       }
     }
@@ -155,7 +171,9 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
     // Determine destination according to startup sequence
     bool hasSeenOnboarding = false;
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance().timeout(
+        const Duration(seconds: 1),
+      );
       hasSeenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
     } catch (e) {
       debugPrint('Error reading onboarding pref: $e');
@@ -173,7 +191,10 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
     // Check saved authentication token
     String? savedToken;
     try {
-      savedToken = await ApiClient.loadSavedToken();
+      savedToken = await ApiClient.loadSavedToken().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => null,
+      );
     } catch (e) {
       debugPrint('Error loading saved token: $e');
     }
@@ -183,11 +204,17 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
 
     if (!mounted) return;
 
+    final Widget destination;
+    if (hasValidToken && ApiClient.isSuperAdmin) {
+      destination = const SuperAdminDashboardScreen();
+    } else if (hasValidToken) {
+      destination = const DashboardScreen();
+    } else {
+      destination = const TempLoginScreen();
+    }
+
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) =>
-            hasValidToken ? const DashboardScreen() : const TempLoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => destination),
     );
   }
 

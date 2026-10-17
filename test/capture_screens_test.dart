@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -52,7 +51,7 @@ void main() {
       iconLoader.addFont(Future.value(ByteData.sublistView(iconBytes)));
       await iconLoader.load();
     } catch (e) {
-      print('Font loading notice: $e');
+      debugPrint('Font loading notice: $e');
     }
   });
 
@@ -96,7 +95,7 @@ void main() {
         final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
         if (byteData != null) {
           File(outputPath).writeAsBytesSync(byteData.buffer.asUint8List());
-          print('Captured screenshot to: $outputPath (${byteData.lengthInBytes} bytes)');
+          debugPrint('Captured screenshot to: $outputPath (${byteData.lengthInBytes} bytes)');
         }
       });
     }

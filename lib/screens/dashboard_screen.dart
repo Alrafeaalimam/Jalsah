@@ -13,7 +13,6 @@ import '../models/router_model.dart';
 import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
-import '../theme/app_theme.dart';
 import '../widgets/app_empty_state.dart';
 import '../widgets/app_error_state.dart';
 import '../widgets/app_loading_state.dart';
@@ -30,7 +29,6 @@ import 'staff_screen.dart';
 import 'temp_login_screen.dart';
 import 'user_profile_screen.dart';
 import 'notifications_screen.dart';
-import '../services/app_settings.dart';
 import '../utils/whatsapp_helper.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -1175,7 +1173,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
+          builder: (dialogContext, setDialogState) {
             return Directionality(
               textDirection: TextDirection.rtl,
               child: AlertDialog(
@@ -1319,7 +1317,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             if (!mounted) return;
 
                             if (result['success'] == true) {
-                              Navigator.of(ctx).pop();
+                              if (ctx.mounted) {
+                                Navigator.of(ctx).pop();
+                              }
                               await _loadSubscriptionStatus();
                               await Future.wait([
                                 _loadRouters(),

@@ -143,12 +143,12 @@ class _VerifyDeviceOtpScreenState extends State<VerifyDeviceOtpScreen> {
                             color: AppColors.pageBg,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.white.withOpacity(0.9),
+                                color: Colors.white.withValues(alpha: 0.9),
                                 offset: const Offset(-5, -5),
                                 blurRadius: 10,
                               ),
                               BoxShadow(
-                                color: const Color(0xFFD1D9E6).withOpacity(0.8),
+                                color: const Color(0xFFD1D9E6).withValues(alpha: 0.8),
                                 offset: const Offset(5, 5),
                                 blurRadius: 10,
                               ),

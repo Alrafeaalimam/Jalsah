@@ -132,6 +132,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         await prefs.setString('user_role', 'TENANT_ADMIN');
       } catch (_) {}
 
+      if (!mounted) return;
+
       final token = result['data']?['token'] as String?;
       final successMsg = result['data']?['message'] as String? ??
           'تم إرسال طلبك، بانتظار موافقة الإدارة';
