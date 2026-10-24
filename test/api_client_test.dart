@@ -180,6 +180,143 @@ void main() {
       final loaded = await ApiClient.loadSavedToken();
       expect(loaded, isNull);
     });
+
+    test('baseUrl is https://alrafeerouter.zone.id and requests target new API domain without Render', () async {
+      expect(ApiClient.baseUrl, equals('https://alrafeerouter.zone.id'));
+      expect(ApiClient.baseUrl.contains('render'), isFalse);
+      expect(ApiClient.baseUrl.contains('onrender.com'), isFalse);
+
+      Uri? capturedUri;
+      Map<String, String>? capturedHeaders;
+
+      ApiClient.client = MockClient((request) async {
+        capturedUri = request.url;
+        capturedHeaders = request.headers;
+        return utf8Response({'success': true, 'data': []}, 200);
+      });
+
+      ApiClient.setAuthToken('test_bearer_token_abc123');
+      await ApiClient.getRouters();
+
+      expect(capturedUri, isNotNull);
+      expect(capturedUri!.scheme, equals('https'));
+      expect(capturedUri!.host, equals('alrafeerouter.zone.id'));
+      expect(capturedUri.toString().contains('onrender.com'), isFalse);
+      expect(capturedHeaders?['authorization'], equals('Bearer test_bearer_token_abc123'));
+
+      // Restore mock backend
+      setupMockBackend();
+    });
+
+    testWidgets('login waits up to 60s (succeeds at 35s, times out at 60s) while non-login requests keep 25s timeout',
+        (WidgetTester tester) async {
+      // 1. A slow login taking 35s (>25s, <60s) should succeed without timing out
+      ApiClient.setDeviceFingerprint('dev_test_fingerprint');
+      ApiClient.client = MockClient((request) async {
+        await Future<void>.delayed(const Duration(seconds: 35));
+        return utf8Response({
+          'success': true,
+          'data': {
+            'token': 'jwt_slow_login_token',
+            'user': {'id': 'u1', 'username': 'admin', 'role': 'TENANT_ADMIN'},
+          },
+        }, 200);
+      });
+
+      Map<String, dynamic>? slowLoginResult;
+      ApiClient.login(username: 'admin', password: 'valid').then((res) {
+        slowLoginResult = res;
+      });
+
+      await tester.pump(const Duration(seconds: 30));
+      expect(slowLoginResult, isNull); // Still waiting at 30s (did not fail at 25s)
+
+      await tester.pump(const Duration(seconds: 6));
+      expect(slowLoginResult, isNotNull);
+      expect(slowLoginResult!['success'], isTrue);
+      expect(ApiClient.authToken, equals('jwt_slow_login_token'));
+
+      // 2. A login taking >60s should time out at 60s with TIMEOUT errorCode
+      ApiClient.client = MockClient((request) async {
+        await Future<void>.delayed(const Duration(seconds: 70));
+        return utf8Response({'success': true, 'data': {}}, 200);
+      });
+
+      Map<String, dynamic>? timeoutLoginResult;
+      ApiClient.login(username: 'admin', password: 'valid').then((res) {
+        timeoutLoginResult = res;
+      });
+
+      await tester.pump(const Duration(seconds: 59));
+      expect(timeoutLoginResult, isNull); // Not timed out yet at 59s
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(timeoutLoginResult, isNotNull);
+      expect(timeoutLoginResult!['success'], isFalse);
+      expect(timeoutLoginResult!['errorCode'], equals('TIMEOUT'));
+      expect(
+        timeoutLoginResult!['errorMessage'],
+        equals('انتهت مهلة الاتصال بالخادم (60 ثانية). يرجى التأكد من استجابة السيرفر.'),
+      );
+      await tester.pump(const Duration(seconds: 10));
+
+      // 3. Non-login requests (e.g. getRouters) still time out at 25s
+      Map<String, dynamic>? routersTimeoutResult;
+      ApiClient.getRouters().then((res) {
+        routersTimeoutResult = res;
+      });
+
+      await tester.pump(const Duration(seconds: 24));
+      expect(routersTimeoutResult, isNull);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(routersTimeoutResult, isNotNull);
+      expect(routersTimeoutResult!['success'], isFalse);
+      expect(routersTimeoutResult!['errorCode'], equals('TIMEOUT'));
+      expect(
+        routersTimeoutResult!['errorMessage'],
+        equals('انتهت مهلة الاتصال بالخادم (25 ثانية). يرجى التأكد من استجابة السيرفر.'),
+      );
+      expect(routersTimeoutResult!['errorMessage'].contains('5 ثوانٍ'), isFalse);
+      await tester.pump(const Duration(seconds: 45));
+
+      // Restore mock backend for subsequent tests
+      setupMockBackend();
+    });
+
+    testWidgets('testRouterConnection timeout returns 25s error message and does not mention 5s',
+        (WidgetTester tester) async {
+      ApiClient.client = MockClient((request) async {
+        await Future<void>.delayed(const Duration(seconds: 30));
+        return utf8Response({'success': true, 'data': {}}, 200);
+      });
+
+      Map<String, dynamic>? probeTimeoutResult;
+      ApiClient.testRouterConnection(
+        host: '1.2.3.4',
+        port: 8729,
+        username: 'admin',
+        password: 'password',
+      ).then((res) {
+        probeTimeoutResult = res;
+      });
+
+      await tester.pump(const Duration(seconds: 24));
+      expect(probeTimeoutResult, isNull);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(probeTimeoutResult, isNotNull);
+      expect(probeTimeoutResult!['success'], isFalse);
+      expect(probeTimeoutResult!['errorCode'], equals('TIMEOUT'));
+      expect(
+        probeTimeoutResult!['errorMessage'],
+        equals('انتهت مهلة الاتصال بالخادم (25 ثانية). يرجى التأكد من استجابة السيرفر.'),
+      );
+      expect(probeTimeoutResult!['errorMessage'].contains('5 ثوانٍ'), isFalse);
+
+      await tester.pump(const Duration(seconds: 10));
+      setupMockBackend();
+    });
   });
 
   group('ApiClient Live Backend Integration Tests (Authenticated)', () {
@@ -300,6 +437,189 @@ void main() {
       final afterDeleteList = (afterDelete['data'] as List).cast<PackageModel>();
       expect(afterDeleteList.length, equals(initialCount));
       expect(afterDeleteList.any((p) => p.id == createdPkg.id), isFalse);
+    });
+
+    test('ApiClient Router Management & HotSpot Session Operations Unit Tests', () async {
+      final capturedCalls = <String>[];
+      ApiClient.client = MockClient((request) async {
+        capturedCalls.add('${request.method} ${request.url.path}');
+
+        if (request.method == 'PATCH' && request.url.path == '/api/v1/routers/r-123') {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['name'], equals('Updated Router'));
+          expect(payload['port'], equals(8729));
+          return utf8Response({
+            'success': true,
+            'data': {
+              'id': 'r-123',
+              'name': 'Updated Router',
+              'host': '192.168.88.1',
+              'apiPort': 8729,
+              'connectionMethod': 'ROUTEROS_API_SSL',
+              'status': 'ONLINE',
+            },
+          }, 200);
+        }
+
+        if (request.method == 'POST' && request.url.path.contains('/api/v1/routers/r-123/test-connection')) {
+          return utf8Response({
+            'success': true,
+            'data': {
+              'identity': 'MikroTik-Main',
+              'version': 'RouterOS v7.14.3',
+              'boardName': 'RB4011iGS+',
+              'cpuLoad': 12,
+              'uptimeSeconds': 12345,
+            },
+          }, 200);
+        }
+
+        if (request.method == 'GET' && request.url.path.contains('/api/v1/routers/r-123/hotspot-users')) {
+          return utf8Response({
+            'success': true,
+            'data': [
+              {
+                'username': 'user101',
+                'profile': 'default',
+                'isEnabled': true,
+                'uptimeSeconds': 3600,
+                'bytesIn': 5000000,
+                'bytesOut': 15000000,
+                'verifiedOnRouter': true,
+                'dbStatus': 'ACTIVE',
+              },
+            ],
+          }, 200);
+        }
+
+        if (request.method == 'PATCH' && request.url.path.contains('/api/v1/routers/r-123/hotspot-users/user101')) {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['isEnabled'], isFalse);
+          return utf8Response({
+            'success': true,
+            'message': 'تم تعطيل المستخدم user101 بنجاح',
+            'data': {'username': 'user101', 'isEnabled': false},
+          }, 200);
+        }
+
+        if (request.method == 'GET' && request.url.path.contains('/api/v1/routers/r-123/hotspot-sessions')) {
+          return utf8Response({
+            'success': true,
+            'data': [
+              {
+                'username': 'user101',
+                'ipAddress': '192.168.88.240',
+                'macAddress': '00:11:22:33:44:55',
+                'uptimeSeconds': 1200,
+                'bytesIn': 2048576,
+                'bytesOut': 8192000,
+              },
+            ],
+          }, 200);
+        }
+
+        if (request.method == 'POST' && request.url.path.contains('/api/v1/routers/r-123/hotspot-sessions/user101/disconnect')) {
+          return utf8Response({
+            'success': true,
+            'message': 'تم فصل الجلسة بنجاح',
+          }, 200);
+        }
+
+        if (request.method == 'POST' && request.url.path.contains('/api/v1/cards/generate-batch')) {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['routerId'], equals('r-123'));
+          return utf8Response({
+            'success': true,
+            'data': {
+              'batch': {
+                'id': 'b-1',
+                'name': 'دفعة اختبار',
+                'quantity': 5,
+                'packageId': 'pkg-1',
+                'routerId': 'r-123',
+                'unitPrice': 100,
+                'totalPrice': 500,
+              },
+              'cards': [],
+            },
+          }, 201);
+        }
+
+        if (request.method == 'GET' && request.url.path.contains('/api/v1/cards/batches')) {
+          return utf8Response({
+            'success': true,
+            'data': [
+              {
+                'id': 'b-1',
+                'name': 'دفعة اختبار',
+                'quantity': 5,
+                'packageId': 'pkg-1',
+                'routerId': 'r-123',
+                'unitPrice': 100,
+                'totalPrice': 500,
+              },
+            ],
+          }, 200);
+        }
+
+        return utf8Response({'success': true, 'data': {}}, 200);
+      });
+
+      // 1. updateRouter
+      final updateRes = await ApiClient.updateRouter(
+        id: 'r-123',
+        name: 'Updated Router',
+        port: 8729,
+      );
+      expect(updateRes['success'], isTrue);
+      expect((updateRes['data'] as RouterModel).name, equals('Updated Router'));
+
+      // 2. testRouterConnectionForId
+      final testConnRes = await ApiClient.testRouterConnectionForId('r-123');
+      expect(testConnRes['success'], isTrue);
+      expect(testConnRes['data']['boardName'], equals('RB4011iGS+'));
+
+      // 3. getRouterHotspotUsers
+      final usersRes = await ApiClient.getRouterHotspotUsers('r-123');
+      expect(usersRes['success'], isTrue);
+      expect(usersRes['data'].length, equals(1));
+      expect(usersRes['data'][0]['username'], equals('user101'));
+
+      // 4. toggleHotspotUser
+      final toggleRes = await ApiClient.toggleHotspotUser(
+        routerId: 'r-123',
+        username: 'user101',
+        isEnabled: false,
+      );
+      expect(toggleRes['success'], isTrue);
+
+      // 5. getRouterHotspotSessions
+      final sessionsRes = await ApiClient.getRouterHotspotSessions('r-123');
+      expect(sessionsRes['success'], isTrue);
+      expect(sessionsRes['data'][0]['ipAddress'], equals('192.168.88.240'));
+
+      // 6. disconnectHotspotSession
+      final disconnectRes = await ApiClient.disconnectHotspotSession(
+        routerId: 'r-123',
+        username: 'user101',
+      );
+      expect(disconnectRes['success'], isTrue);
+
+      // 7. generateCardBatch with routerId
+      final genBatchRes = await ApiClient.generateCardBatch(
+        packageId: 'pkg-1',
+        quantity: 5,
+        routerId: 'r-123',
+      );
+      expect(genBatchRes['success'], isTrue);
+
+      // 8. getBatches
+      final batchesRes = await ApiClient.getBatches();
+      expect(batchesRes['success'], isTrue);
+      expect(batchesRes['data'].length, equals(1));
+
+      // Restore mock backend
+      setupMockBackend();
     });
   });
 }

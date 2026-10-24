@@ -8,13 +8,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../models/router_model.dart';
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 
 class AddRouterScreen extends StatefulWidget {
-  const AddRouterScreen({super.key});
+  final RouterModel? routerToEdit;
+
+  const AddRouterScreen({super.key, this.routerToEdit});
 
   @override
   State<AddRouterScreen> createState() => _AddRouterScreenState();
@@ -23,9 +26,11 @@ class AddRouterScreen extends StatefulWidget {
 class _AddRouterScreenState extends State<AddRouterScreen> {
   final _nameController = TextEditingController();
   final _hostController = TextEditingController();
-  final _portController = TextEditingController(text: '8728');
+  final _portController = TextEditingController(text: '8729');
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _fingerprintController = TextEditingController();
+  String _connectionMethod = 'ROUTEROS_API_SSL';
 
   String? _nameError;
   String? _hostError;
@@ -39,12 +44,32 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
   String? _testSuccessMessage;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.routerToEdit != null) {
+      final r = widget.routerToEdit!;
+      _nameController.text = r.name;
+      _hostController.text = r.host;
+      _portController.text = r.apiPort.toString();
+      const validMethods = ['ROUTEROS_API_SSL', 'REST_API_HTTPS', 'ROUTEROS_API_PLAIN'];
+      if (validMethods.contains(r.connectionMethod)) {
+        _connectionMethod = r.connectionMethod;
+      } else if (r.connectionMethod == 'ROUTEROS_API') {
+        _connectionMethod = 'ROUTEROS_API_PLAIN';
+      } else {
+        _connectionMethod = 'ROUTEROS_API_SSL';
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _hostController.dispose();
     _portController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _fingerprintController.dispose();
     super.dispose();
   }
 
@@ -81,13 +106,13 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       }
 
       final username = _usernameController.text.trim();
-      if (username.isEmpty) {
+      if (widget.routerToEdit == null && username.isEmpty) {
         _usernameError = 'يرجى إدخال اسم المستخدم';
         isValid = false;
       }
 
       final password = _passwordController.text;
-      if (password.isEmpty) {
+      if (widget.routerToEdit == null && password.isEmpty) {
         _passwordError = 'يرجى إدخال كلمة المرور';
         isValid = false;
       }
@@ -135,6 +160,10 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       port: portVal,
       username: username,
       password: password,
+      connectionMethod: _connectionMethod,
+      certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
+          ? _fingerprintController.text.trim()
+          : null,
     );
 
     if (!mounted) return;
@@ -221,13 +250,34 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       _serverErrorMessage = null;
     });
 
-    final result = await ApiClient.createRouter(
-      name: _nameController.text.trim(),
-      host: _hostController.text.trim(),
-      port: int.parse(_portController.text.trim()),
-      username: _usernameController.text.trim(),
-      password: _passwordController.text,
-    );
+    final result = widget.routerToEdit != null
+        ? await ApiClient.updateRouter(
+            id: widget.routerToEdit!.id,
+            name: _nameController.text.trim(),
+            host: _hostController.text.trim(),
+            port: int.parse(_portController.text.trim()),
+            username: _usernameController.text.trim().isNotEmpty
+                ? _usernameController.text.trim()
+                : null,
+            password: _passwordController.text.isNotEmpty
+                ? _passwordController.text
+                : null,
+            connectionMethod: _connectionMethod,
+            certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
+                ? _fingerprintController.text.trim()
+                : null,
+          )
+        : await ApiClient.createRouter(
+            name: _nameController.text.trim(),
+            host: _hostController.text.trim(),
+            port: int.parse(_portController.text.trim()),
+            username: _usernameController.text.trim(),
+            password: _passwordController.text,
+            connectionMethod: _connectionMethod,
+            certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
+                ? _fingerprintController.text.trim()
+                : null,
+          );
 
     if (!mounted) return;
 
@@ -236,6 +286,9 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
     });
 
     if (result['success'] == true) {
+      final successMsg = widget.routerToEdit != null
+          ? 'تم تحديث بيانات الراوتر بنجاح'
+          : 'تم حفظ الراوتر وإضافته للنظام بنجاح';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: AppColors.statusOnline,
@@ -246,7 +299,7 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
               const Icon(Icons.check_circle_rounded, color: Colors.white),
               const SizedBox(width: 10),
               Text(
-                'تم حفظ الراوتر وإضافته للنظام بنجاح',
+                successMsg,
                 style: GoogleFonts.cairo(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
@@ -315,7 +368,7 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                     ),
                   ),
                   Text(
-                    'إضافة راوتر جديد',
+                    widget.routerToEdit != null ? 'تعديل الراوتر' : 'إضافة راوتر جديد',
                     style: GoogleFonts.cairo(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
@@ -455,10 +508,80 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                     ),
                     const SizedBox(height: 16),
 
+                    // Protocol / Connection Method Selector
+                    Text(
+                      'بروتوكول الاتصال والتشفير',
+                      style: GoogleFonts.cairo(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.cardSurface,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          const BoxShadow(
+                            color: AppColors.shadowLight,
+                            offset: Offset(-2, -2),
+                            blurRadius: 4,
+                          ),
+                          BoxShadow(
+                            color: AppColors.shadowDark.withValues(alpha: 0.5),
+                            offset: const Offset(2, 2),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: _connectionMethod,
+                          dropdownColor: AppColors.cardSurface,
+                          style: GoogleFonts.cairo(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textDark,
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'ROUTEROS_API_SSL',
+                              child: Text('API-SSL المشفر (منفذ 8729 - موصى به لـ v6 و v7)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'REST_API_HTTPS',
+                              child: Text('REST API عبر HTTPS (منفذ 443 - خاص بـ v7)'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'ROUTEROS_API_PLAIN',
+                              child: Text('API غير مشفر (منفذ 8728 - شبكة محلية/VPN فقط)'),
+                            ),
+                          ],
+                          onChanged: (val) {
+                            if (val == null) return;
+                            setState(() {
+                              _connectionMethod = val;
+                              if (val == 'ROUTEROS_API_SSL') {
+                                _portController.text = '8729';
+                              } else if (val == 'REST_API_HTTPS') {
+                                _portController.text = '443';
+                              } else if (val == 'ROUTEROS_API_PLAIN') {
+                                _portController.text = '8728';
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
                     // API Port
                     NeumorphicTextField(
                       label: 'منفذ RouterOS API',
-                      hintText: '8728 (الافتراضي)',
+                      hintText: '8729 (الافتراضي المشفر)',
                       controller: _portController,
                       errorText: _portError,
                       keyboardType: TextInputType.number,
@@ -469,6 +592,23 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                         size: 20,
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // Certificate Fingerprint (Optional)
+                    if (_connectionMethod == 'ROUTEROS_API_SSL' || _connectionMethod == 'REST_API_HTTPS') ...[
+                      NeumorphicTextField(
+                        label: 'بصمة شهادة SSL (اختياري - SHA-256)',
+                        hintText: 'للشهادات ذاتية التوقيع (Self-Signed Pinning)',
+                        controller: _fingerprintController,
+                        textDirection: TextDirection.ltr,
+                        prefixIcon: const Icon(
+                          Icons.verified_user_rounded,
+                          color: AppColors.textMuted,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     const SizedBox(height: 16),
 
                     // Username
@@ -489,7 +629,9 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                     // Password
                     NeumorphicTextField(
                       label: 'كلمة المرور',
-                      hintText: 'أدخل كلمة مرور الراوتر',
+                      hintText: widget.routerToEdit != null
+                          ? 'اتركها فارغة للإبقاء على كلمة المرور الحالية'
+                          : 'أدخل كلمة مرور الراوتر',
                       controller: _passwordController,
                       isPassword: true,
                       errorText: _passwordError,
@@ -579,7 +721,11 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                             ),
                           const SizedBox(width: 8),
                           Text(
-                            _isSaving ? 'جارٍ الحفظ...' : 'حفظ الراوتر',
+                            _isSaving
+                                ? 'جارٍ الحفظ...'
+                                : (widget.routerToEdit != null
+                                    ? 'حفظ التعديلات'
+                                    : 'حفظ الراوتر'),
                             style: GoogleFonts.cairo(
                               fontSize: 14,
                               fontWeight: FontWeight.w800,

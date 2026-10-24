@@ -10,6 +10,7 @@ class CardBatchModel {
   final String? name;
   final int quantity;
   final String packageId;
+  final String? routerId;
   final String? prefix;
   final double unitPrice;
   final double totalPrice;
@@ -21,6 +22,7 @@ class CardBatchModel {
     this.name,
     required this.quantity,
     required this.packageId,
+    this.routerId,
     this.prefix,
     this.unitPrice = 0.0,
     this.totalPrice = 0.0,
@@ -41,6 +43,7 @@ class CardBatchModel {
       name: json['name'] as String?,
       quantity: (json['quantity'] as num?)?.toInt() ?? 0,
       packageId: json['packageId'] as String? ?? '',
+      routerId: json['routerId'] as String?,
       prefix: json['prefix'] as String?,
       unitPrice: (json['unitPrice'] as num?)?.toDouble() ?? 0.0,
       totalPrice: (json['totalPrice'] as num?)?.toDouble() ?? 0.0,
@@ -55,6 +58,7 @@ class CardBatchModel {
       if (name != null) 'name': name,
       'quantity': quantity,
       'packageId': packageId,
+      if (routerId != null) 'routerId': routerId,
       if (prefix != null) 'prefix': prefix,
       'unitPrice': unitPrice,
       'totalPrice': totalPrice,

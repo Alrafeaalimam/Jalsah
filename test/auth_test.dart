@@ -196,6 +196,95 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
     });
+
+    testWidgets('handles slow login (35s) by keeping loading state active and times out after 60s with real error banner',
+        (WidgetTester tester) async {
+      int loginRequestCount = 0;
+      ApiClient.client = MockClient((request) async {
+        if (request.url.path.contains('/auth/login')) {
+          loginRequestCount++;
+          // First attempt hangs for 70s to trigger actual 60s TimeoutException
+          if (loginRequestCount == 1) {
+            await Future<void>.delayed(const Duration(seconds: 70));
+            return utf8Response({'success': true, 'data': {}}, 200);
+          }
+          // Second attempt takes 35s (>25s, <60s) and succeeds
+          await Future<void>.delayed(const Duration(seconds: 35));
+          return utf8Response({
+            'success': true,
+            'data': {
+              'token': 'slow_jwt_token_60s',
+              'user': {
+                'id': 'u-1',
+                'username': 'admin',
+                'fullName': 'مدير النظام',
+                'role': 'TENANT_ADMIN',
+                'tenantId': 't-1',
+              },
+            },
+          }, 200);
+        }
+        return utf8Response({'success': true, 'data': []}, 200);
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: TempLoginScreen(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(NeumorphicTextField, 'اسم المستخدم أو البريد الإلكتروني'),
+        'admin',
+      );
+      await tester.enterText(
+        find.widgetWithText(NeumorphicTextField, 'كلمة المرور'),
+        'somePass',
+      );
+      await tester.pump();
+
+      // Trigger 1st login attempt (will hang >60s)
+      await tester.tap(find.byIcon(Icons.login_rounded));
+      await tester.pump(const Duration(seconds: 30));
+
+      // At 30s: still loading, indicator & waiting text visible, duplicate tap ignored
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('جاري تسجيل الدخول...'), findsOneWidget);
+      expect(
+        find.text('يرجى الانتظار، جاري الاتصال بالخادم والتحقق من البيانات...'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('جاري تسجيل الدخول...'));
+      expect(loginRequestCount, equals(1));
+
+      // Advance past 60s timeout
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pumpAndSettle();
+
+      // Loading indicator dismissed and real 60s timeout error message displayed
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(
+        find.text('انتهت مهلة الاتصال بالخادم (60 ثانية). يرجى التأكد من استجابة السيرفر.'),
+        findsOneWidget,
+      );
+      // Advance remaining 10s so the first MockClient delayed timer finishes cleanly
+      await tester.pump(const Duration(seconds: 10));
+
+      // Trigger 2nd login attempt (takes 35s and succeeds)
+      await tester.tap(find.byIcon(Icons.login_rounded));
+      await tester.pump(const Duration(seconds: 30));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DashboardScreen), findsOneWidget);
+      expect(ApiClient.authToken, equals('slow_jwt_token_60s'));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    });
   });
 
   group('DashboardScreen 401 UNAUTHORIZED Redirection Tests', () {

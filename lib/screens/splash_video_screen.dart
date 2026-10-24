@@ -235,8 +235,12 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
         !_hasInitError) {
       final size = _controller!.value.size;
       final bool isPlaying = _controller!.value.isPlaying;
+      final aspectRatio = _controller!.value.aspectRatio > 0
+          ? _controller!.value.aspectRatio
+          : (size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9);
 
       return GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () {
           if (!_controller!.value.isPlaying) {
             _controller!.play();
@@ -247,34 +251,35 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
           } catch (_) {}
           setState(() {});
         },
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox.expand(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: size.width > 0 ? size.width : 1280,
-                  height: size.height > 0 ? size.height : 720,
+        child: Container(
+          color: const Color(0xFF0F0E1E),
+          width: double.infinity,
+          height: double.infinity,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio: aspectRatio,
                   child: VideoPlayer(_controller!),
                 ),
               ),
-            ),
-            // Play overlay if browser required user gesture
-            if (!isPlaying && !_hasNavigated)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
+              // Play overlay if browser required user gesture
+              if (!isPlaying && !_hasNavigated)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.play_arrow_rounded,
+                    size: 48,
+                    color: Colors.white,
+                  ),
                 ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  size: 48,
-                  color: Colors.white,
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       );
     }

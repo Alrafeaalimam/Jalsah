@@ -55,4 +55,4 @@ jobs:
           git push --delete origin v1.0.0 || true
           gh release create v1.0.0 Jalsah.apk \
             --title "Jalsah v1.0.0 (Official Release)" \
-            --notes "النسخة الرسمية لتطبيق جلسة (Jalsah) المتصلة بالخادم السحابي المباشر: https://mikrotik-cards-backend.onrender.com"
+            --notes "النسخة الرسمية لتطبيق جلسة (Jalsah) المتصلة بالخادم السحابي المباشر: https://alrafeerouter.zone.id"

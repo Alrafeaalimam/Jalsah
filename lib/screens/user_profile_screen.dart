@@ -1,17 +1,19 @@
 // ============================================================================
 // Platform: Commercial MikroTik Network & HotSpot Card Management System (Jalsah)
 // File: lib/screens/user_profile_screen.dart
-// Screen: User Profile & Logout Screen (Rule 14, Rule 20, Rule 26)
+// Screen: User Profile & Subscription Management Screen (Rule 14, Rule 20, Rule 26, Phase 14)
 // ============================================================================
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../services/app_settings.dart';
 import '../theme/app_colors.dart';
 import '../utils/whatsapp_helper.dart';
-import '../widgets/pressable_neumorphic_card.dart';
+import '../widgets/bounce_button.dart';
+import 'subscription_plans_screen.dart';
 import 'temp_login_screen.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -35,9 +37,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String _fullName = '';
   String _username = '';
   String _email = '';
+  String _phone = '';
+  String _avatarUrl = '';
   String _role = '';
   String _networkName = '';
   String _status = 'ACTIVE';
+
+  SubscriptionStatusModel? _subscriptionStatus;
+  List<Map<String, dynamic>> _myRequests = [];
+  bool _isLoadingRequests = false;
+
+  static const List<String> _avatarPresets = [
+    'assets/avatars/avatar_1.png',
+    'assets/avatars/avatar_2.png',
+    'assets/avatars/avatar_3.png',
+    'assets/avatars/avatar_4.png',
+    'assets/avatars/avatar_5.png',
+    'assets/avatars/avatar_6.png',
+  ];
 
   @override
   void initState() {
@@ -53,25 +70,77 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       _errorMessage = null;
     });
 
-    final result = await ApiClient.getCurrentUserProfile();
-    if (!mounted) return;
+    try {
+      final results = await Future.wait([
+        ApiClient.getCurrentUserProfile(),
+        ApiClient.getSubscriptionStatus(),
+        ApiClient.getMySubscriptionRequests(),
+      ]);
 
-    if (result['success'] == true && result['data'] != null) {
-      final data = result['data'] as Map<String, dynamic>;
-      setState(() {
+      if (!mounted) return;
+
+      final profileRes = results[0];
+      final subRes = results[1];
+      final reqRes = results[2];
+
+      if (profileRes['success'] == true && profileRes['data'] != null) {
+        final data = profileRes['data'] as Map<String, dynamic>;
         _fullName = (data['fullName'] as String?)?.trim() ?? _fullName;
         _username = (data['username'] as String?)?.trim() ?? _username;
-        _email = (data['email'] as String?)?.trim() ?? 'غير محدد';
+        _email = (data['email'] as String?)?.trim() ?? 'غير مسجل';
+        _phone = (data['phone'] as String?)?.trim() ?? '';
+        _avatarUrl = (data['avatarUrl'] as String?)?.trim() ?? '';
         _role = (data['role'] as String?)?.trim() ?? ApiClient.getUserRole() ?? 'TENANT_ADMIN';
         _networkName = (data['networkName'] as String?)?.trim() ?? 'شبكة جلسة';
         _status = (data['status'] as String?)?.trim() ?? 'ACTIVE';
-        _isLoading = false;
-      });
-    } else {
+      } else {
+        _errorMessage = profileRes['errorMessage'] as String? ?? 'تعذر تحميل بيانات الملف الشخصي';
+      }
+
+      if (subRes['success'] == true && subRes['data'] != null) {
+        if (subRes['data'] is SubscriptionStatusModel) {
+          _subscriptionStatus = subRes['data'] as SubscriptionStatusModel;
+        } else if (subRes['data'] is Map<String, dynamic>) {
+          _subscriptionStatus = SubscriptionStatusModel.fromJson(subRes['data'] as Map<String, dynamic>);
+        }
+      }
+
+      if (reqRes['success'] == true) {
+        final list = reqRes['data'] ?? reqRes['requests'];
+        if (list is List) {
+          _myRequests = List<Map<String, dynamic>>.from(list);
+        }
+      }
+
       setState(() {
-        _errorMessage = result['errorMessage'] as String? ?? 'تعذر تحميل بيانات الملف الشخصي';
         _isLoading = false;
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'خطأ أثناء تحميل البيانات: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _fetchRequests() async {
+    setState(() => _isLoadingRequests = true);
+    try {
+      final res = await ApiClient.getMySubscriptionRequests();
+      if (res['success'] == true && res['requests'] is List) {
+        if (mounted) {
+          setState(() {
+            _myRequests = List<Map<String, dynamic>>.from(res['requests']);
+          });
+        }
+      }
+    } catch (_) {
+      // Graceful fallback
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingRequests = false);
+      }
     }
   }
 
@@ -87,6 +156,260 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         return 'كاشير / موظف مبيعات (Cashier)';
       default:
         return role;
+    }
+  }
+
+  void _showAvatarPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.pageBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'اختر الصورة الرمزية',
+                style: GoogleFonts.cairo(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                alignment: WrapAlignment.center,
+                children: _avatarPresets.map((avatar) {
+                  final isSelected = _avatarUrl == avatar;
+                  return GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await _updateAvatar(avatar);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? AppColors.heroGradientStart : Colors.black12,
+                          width: isSelected ? 3 : 1,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 26,
+                        backgroundColor: AppColors.heroGradientStart.withValues(alpha: 0.15),
+                        child: const Icon(
+                          Icons.person_rounded,
+                          color: AppColors.heroGradientStart,
+                          size: 28,
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateAvatar(String newAvatar) async {
+    final res = await ApiClient.updateUserProfile(avatarUrl: newAvatar);
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      setState(() => _avatarUrl = newAvatar);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم تحديث الصورة الرمزية بنجاح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'تعذر تحديث الصورة', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  void _showEditProfileDialog() {
+    final nameCtrl = TextEditingController(text: _fullName);
+    final phoneCtrl = TextEditingController(text: _phone);
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: AppColors.pageBg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              'تعديل البيانات الشخصية',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 17),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'الاسم الكامل',
+                    labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  style: GoogleFonts.cairo(fontSize: 14),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: InputDecoration(
+                    labelText: 'رقم الهاتف',
+                    labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  style: GoogleFonts.cairo(fontSize: 14),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(dialogCtx),
+                child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        final res = await ApiClient.updateUserProfile(
+                          fullName: nameCtrl.text.trim(),
+                          phone: phoneCtrl.text.trim(),
+                        );
+                        if (!mounted) return;
+                        if (res['success'] == true) {
+                          if (dialogCtx.mounted) {
+                            Navigator.pop(dialogCtx);
+                          }
+                          setState(() {
+                            _fullName = nameCtrl.text.trim();
+                            _phone = phoneCtrl.text.trim();
+                          });
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('تم تحديث البيانات بنجاح', style: GoogleFonts.cairo()),
+                                backgroundColor: AppColors.statusOnline,
+                              ),
+                            );
+                          }
+                        } else {
+                          setDialogState(() => isSaving = false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(res['errorMessage'] as String? ?? 'تعذر التحديث', style: GoogleFonts.cairo()),
+                                backgroundColor: AppColors.statusOffline,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        'حفظ',
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.w700, color: Colors.white),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelRequest(String requestId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'إلغاء طلب التفعيل',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16),
+          ),
+          content: Text(
+            'هل أنت متأكد من رغبتك في إلغاء هذا الطلب المعلق؟',
+            style: GoogleFonts.cairo(fontSize: 13.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('تراجع', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusOffline,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(
+                'نعم، إلغاء الطلب',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isLoadingRequests = true);
+    final res = await ApiClient.cancelSubscriptionRequest(requestId);
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم إلغاء الطلب بنجاح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+      await _loadProfile();
+    } else {
+      setState(() => _isLoadingRequests = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'تعذر إلغاء الطلب', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
     }
   }
 
@@ -178,101 +501,93 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               ? const Center(
                   child: CircularProgressIndicator(color: AppColors.heroGradientStart),
                 )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  child: Column(
-                    children: [
-                      // User Avatar & Greeting Header
-                      _buildHeaderCard(),
-                      const SizedBox(height: 20),
+              : RefreshIndicator(
+                  onRefresh: _loadProfile,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Column(
+                      children: [
+                        // User Avatar & Greeting Header
+                        _buildHeaderCard(),
+                        const SizedBox(height: 20),
 
-                      if (_errorMessage != null) ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppColors.statusOffline.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.error_outline_rounded,
-                                color: AppColors.statusOffline,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _errorMessage!,
-                                  style: GoogleFonts.cairo(
-                                    fontSize: 12.5,
-                                    color: AppColors.statusOffline,
-                                    fontWeight: FontWeight.w600,
+                        if (_errorMessage != null) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.statusOffline.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.error_outline_rounded,
+                                  color: AppColors.statusOffline,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _errorMessage!,
+                                    style: GoogleFonts.cairo(
+                                      fontSize: 12.5,
+                                      color: AppColors.statusOffline,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Subscription Status Card
+                        _buildSubscriptionCard(),
+                        const SizedBox(height: 20),
+
+                        // Profile Details Card
+                        _buildDetailsCard(),
+                        const SizedBox(height: 20),
+
+                        // Activation Requests Card
+                        _buildRequestsHistoryCard(),
+                        const SizedBox(height: 20),
+
+                        // WhatsApp Support Card
+                        buildWhatsAppSupportCard(
+                          context: context,
+                          title: 'الدعم الفني والمساعدة',
+                          englishTag: AppSettings.instance.appName.contains(RegExp(r'[a-zA-Z]'))
+                              ? AppSettings.instance.appName
+                              : 'Jalsah',
+                          subtitle: 'هل تحتاج مساعدة في إدارة شبكتك أو بطاقاتك؟',
+                        ),
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Text(
+                            'البريد الإلكتروني للدعم: ${AppSettings.instance.supportEmail}',
+                            style: GoogleFonts.cairo(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 24),
+
+                        // Tactile Micro-interactive Logout Button
+                        BounceButton(
+                          onPressed: _handleLogout,
+                          label: 'تسجيل الخروج',
+                          icon: Icons.logout_rounded,
+                          style: BounceButtonStyle.danger,
+                          height: 52,
+                        ),
+                        const SizedBox(height: 24),
                       ],
-
-                      // Profile Details Card
-                      _buildDetailsCard(),
-                      const SizedBox(height: 20),
-
-                      // WhatsApp Support Card
-                      buildWhatsAppSupportCard(
-                        context: context,
-                        title: 'الدعم الفني والمساعدة',
-                        englishTag: AppSettings.instance.appName.contains(RegExp(r'[a-zA-Z]'))
-                            ? AppSettings.instance.appName
-                            : 'Jalsah',
-                        subtitle: 'هل تحتاج مساعدة في إدارة شبكتك أو بطاقاتك؟',
-                      ),
-                      const SizedBox(height: 10),
-                      Center(
-                        child: Text(
-                          'البريد الإلكتروني للدعم: ${AppSettings.instance.supportEmail}',
-                          style: GoogleFonts.cairo(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Logout Button
-                      PressableNeumorphicCard(
-                        onTap: _handleLogout,
-                        backgroundColor: AppColors.statusOffline,
-                        borderRadius: BorderRadius.circular(16),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        child: Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
-                                Icons.logout_rounded,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'تسجيل الخروج',
-                                style: GoogleFonts.cairo(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                    ],
+                    ),
                   ),
                 ),
         ),
@@ -306,25 +621,47 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       ),
       child: Column(
         children: [
-          // Avatar Icon
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.4),
-                width: 2,
+          Stack(
+            children: [
+              Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.4),
+                    width: 2,
+                  ),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.person_rounded,
+                    size: 44,
+                    color: Colors.white,
+                  ),
+                ),
               ),
-            ),
-            child: const Center(
-              child: Icon(
-                Icons.person_rounded,
-                size: 40,
-                color: Colors.white,
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: InkWell(
+                  onTap: _showAvatarPicker,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(
+                      color: AppColors.accentYellow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.camera_alt_rounded,
+                      size: 14,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
           const SizedBox(height: 12),
           Text(
@@ -353,6 +690,130 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 color: Colors.white,
               ),
             ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 15, color: Colors.white),
+            label: Text(
+              'تعديل البيانات الشخصية',
+              style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.6)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            ),
+            onPressed: _showEditProfileDialog,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubscriptionCard() {
+    final status = _subscriptionStatus?.subscriptionStatus ?? 'TRIAL';
+    final isTrial = status.toUpperCase() == 'TRIAL';
+    final remainingDays = _subscriptionStatus?.daysRemaining ?? 0;
+    final planName = _subscriptionStatus?.planName ?? (isTrial ? 'باقة تجريبية (Trial)' : 'باقة مخصصة');
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.pageBg,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isTrial ? const Color(0xFFD97706) : AppColors.statusOnline.withValues(alpha: 0.5),
+          width: 1.2,
+        ),
+        boxShadow: [
+          const BoxShadow(
+            color: AppColors.shadowLight,
+            offset: Offset(-4, -4),
+            blurRadius: 8,
+          ),
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.35),
+            offset: const Offset(4, 4),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isTrial ? Icons.hourglass_top_rounded : Icons.verified_user_rounded,
+                color: isTrial ? const Color(0xFFD97706) : AppColors.statusOnline,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isTrial ? 'الاشتراك التجريبي (Trial)' : 'الاشتراك النشط (Active)',
+                  style: GoogleFonts.cairo(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: isTrial ? const Color(0xFFD97706) : AppColors.statusOnline,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (isTrial ? const Color(0xFFD97706) : AppColors.statusOnline).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  status.toUpperCase(),
+                  style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: isTrial ? const Color(0xFFD97706) : AppColors.statusOnline,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildInfoRow(
+            icon: Icons.card_membership_rounded,
+            label: 'الباقة الحالية',
+            value: planName,
+          ),
+          const Divider(height: 16, color: AppColors.shadowDark),
+          _buildInfoRow(
+            icon: Icons.access_time_rounded,
+            label: 'الأيام المتبقية في الاشتراك',
+            value: '$remainingDays يوم',
+            valueColor: remainingDays <= 2 ? AppColors.statusOffline : AppColors.textDark,
+          ),
+          if (isTrial) ...[
+            const SizedBox(height: 10),
+            Text(
+              'تنبيه: لتوليد بطاقات HotSpot وطباعتها، يتطلب النظام اشتراكاً نشطاً.',
+              style: GoogleFonts.cairo(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFFB45309),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          BounceButton(
+            label: isTrial ? 'ترقية وتنشيط الاشتراك الآن' : 'تجديد أو ترقية الاشتراك',
+            icon: Icons.workspace_premium_rounded,
+            height: 46,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionPlansScreen()),
+              ).then((_) {
+                _loadProfile();
+                _fetchRequests();
+              });
+            },
           ),
         ],
       ),
@@ -408,6 +869,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             label: 'البريد الإلكتروني',
             value: _email.isNotEmpty ? _email : 'غير مسجل',
           ),
+          if (_phone.isNotEmpty) ...[
+            const Divider(height: 20, color: AppColors.shadowDark),
+            _buildInfoRow(
+              icon: Icons.phone_android_rounded,
+              label: 'رقم الهاتف',
+              value: _phone,
+            ),
+          ],
           const Divider(height: 20, color: AppColors.shadowDark),
           _buildInfoRow(
             icon: Icons.wifi_rounded,
@@ -421,6 +890,156 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             value: _status == 'ACTIVE' ? 'نشط' : 'معطل',
             valueColor: _status == 'ACTIVE' ? AppColors.statusOnline : AppColors.statusOffline,
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRequestsHistoryCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.pageBg,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          const BoxShadow(
+            color: AppColors.shadowLight,
+            offset: Offset(-4, -4),
+            blurRadius: 8,
+          ),
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.35),
+            offset: const Offset(4, 4),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.history_rounded, color: AppColors.heroGradientStart, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'طلبات التفعيل السابقة',
+                  style: GoogleFonts.cairo(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ),
+              if (_isLoadingRequests)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.heroGradientStart),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (_myRequests.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'لا توجد طلبات سابقة لتنشيط الحساب.',
+                style: GoogleFonts.cairo(fontSize: 12.5, color: AppColors.textMuted),
+              ),
+            )
+          else
+            ..._myRequests.map((req) {
+              final status = (req['status'] as String? ?? 'PENDING').toUpperCase();
+              final plan = req['plan'] is Map<String, dynamic> ? req['plan'] as Map<String, dynamic> : {};
+              final planName = plan['name'] as String? ?? req['planName'] as String? ?? 'باقة اشتراك';
+              final price = req['priceSnapshot'] ?? plan['price'] ?? 0;
+              final currency = req['currencySnapshot'] ?? plan['currency'] ?? 'USD';
+
+              Color badgeColor = const Color(0xFFD97706);
+              String badgeText = 'قيد المراجعة';
+              if (status == 'APPROVED') {
+                badgeColor = AppColors.statusOnline;
+                badgeText = 'تم التفعيل';
+              } else if (status == 'REJECTED') {
+                badgeColor = AppColors.statusOffline;
+                badgeText = 'مرفوض';
+              } else if (status == 'CANCELLED') {
+                badgeColor = AppColors.textMuted;
+                badgeText = 'تم الإلغاء';
+              }
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.shadowDark.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          planName,
+                          style: GoogleFonts.cairo(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        Text(
+                          '$price $currency',
+                          style: GoogleFonts.cairo(fontSize: 11, color: AppColors.textMuted),
+                        ),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (status == 'PENDING' && req['id'] != null) ...[
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () => _cancelRequest(req['id'].toString()),
+                            child: Text(
+                              'إلغاء',
+                              style: GoogleFonts.cairo(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.statusOffline,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: badgeColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            badgeText,
+                            style: GoogleFonts.cairo(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: badgeColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
         ],
       ),
     );

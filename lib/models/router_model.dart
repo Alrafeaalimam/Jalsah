@@ -9,31 +9,52 @@ class RouterModel {
   final String name;
   final String host;
   final int apiPort;
+  final String connectionMethod;
   final String status;
   final String? boardModel;
   final String? routerOsVersion;
+  final int? cpuLoadPercentage;
+  final int? uptimeSeconds;
+  final String? lastErrorMessage;
+  final DateTime? lastSeenAt;
 
   const RouterModel({
     required this.id,
     required this.name,
     required this.host,
     required this.apiPort,
+    this.connectionMethod = 'ROUTEROS_API_SSL',
     required this.status,
     this.boardModel,
     this.routerOsVersion,
+    this.cpuLoadPercentage,
+    this.uptimeSeconds,
+    this.lastErrorMessage,
+    this.lastSeenAt,
   });
 
   bool get isOnline => status.toUpperCase() == 'ONLINE';
 
   factory RouterModel.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic value) {
+      if (value == null) return null;
+      if (value is DateTime) return value;
+      return DateTime.tryParse(value.toString());
+    }
+
     return RouterModel(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       host: json['host'] as String? ?? '',
       apiPort: (json['apiPort'] as num?)?.toInt() ?? 8728,
+      connectionMethod: json['connectionMethod'] as String? ?? 'ROUTEROS_API_SSL',
       status: json['status'] as String? ?? 'OFFLINE',
       boardModel: json['boardModel'] as String?,
       routerOsVersion: json['routerOsVersion'] as String?,
+      cpuLoadPercentage: (json['cpuLoadPercentage'] as num?)?.toInt(),
+      uptimeSeconds: (json['uptimeSeconds'] as num?)?.toInt(),
+      lastErrorMessage: json['lastErrorMessage'] as String?,
+      lastSeenAt: parseDate(json['lastSeenAt']),
     );
   }
 
@@ -43,9 +64,14 @@ class RouterModel {
       'name': name,
       'host': host,
       'apiPort': apiPort,
+      'connectionMethod': connectionMethod,
       'status': status,
       if (boardModel != null) 'boardModel': boardModel,
       if (routerOsVersion != null) 'routerOsVersion': routerOsVersion,
+      if (cpuLoadPercentage != null) 'cpuLoadPercentage': cpuLoadPercentage,
+      if (uptimeSeconds != null) 'uptimeSeconds': uptimeSeconds,
+      if (lastErrorMessage != null) 'lastErrorMessage': lastErrorMessage,
+      if (lastSeenAt != null) 'lastSeenAt': lastSeenAt!.toIso8601String(),
     };
   }
 

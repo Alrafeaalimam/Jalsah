@@ -264,7 +264,7 @@ class CardVoucherWidget extends StatelessWidget {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: QrImageView(
-                        data: '${card.username}:${card.password}',
+                        data: card.password.isNotEmpty ? '${card.username}:${card.password}' : card.username,
                         version: QrVersions.auto,
                         size: 86.0,
                         backgroundColor: Colors.white,
@@ -287,9 +287,9 @@ class CardVoucherWidget extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Username
+                        // Username or Voucher Code
                         Text(
-                          'اسم المستخدم / User',
+                          card.password.isEmpty ? 'رقم الكرت / Voucher Code' : 'اسم المستخدم / User',
                           style: GoogleFonts.cairo(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
@@ -301,7 +301,7 @@ class CardVoucherWidget extends StatelessWidget {
                           onTap: () => _copyToClipboard(
                             context,
                             card.username,
-                            'اسم المستخدم',
+                            card.password.isEmpty ? 'رقم الكرت' : 'اسم المستخدم',
                           ),
                           child: Row(
                             children: [
@@ -311,10 +311,10 @@ class CardVoucherWidget extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: GoogleFonts.cairo(
-                                    fontSize: 16,
+                                    fontSize: card.password.isEmpty ? 18 : 16,
                                     fontWeight: FontWeight.w900,
-                                    color: Colors.white,
-                                    letterSpacing: 1.1,
+                                    color: card.password.isEmpty ? AppColors.accentYellow : Colors.white,
+                                    letterSpacing: 1.2,
                                   ),
                                 ),
                               ),
@@ -327,48 +327,50 @@ class CardVoucherWidget extends StatelessWidget {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        if (card.password.isNotEmpty) ...[
+                          const SizedBox(height: 8),
 
-                        // Password / PIN
-                        Text(
-                          'كلمة المرور / PIN',
-                          style: GoogleFonts.cairo(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.7),
+                          // Password / PIN
+                          Text(
+                            'كلمة المرور / PIN',
+                            style: GoogleFonts.cairo(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.7),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 1),
-                        InkWell(
-                          onTap: () => _copyToClipboard(
-                            context,
-                            card.password,
-                            'كلمة المرور',
-                          ),
-                          child: Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  card.password,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: GoogleFonts.cairo(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppColors.accentYellow,
-                                    letterSpacing: 2.0,
+                          const SizedBox(height: 1),
+                          InkWell(
+                            onTap: () => _copyToClipboard(
+                              context,
+                              card.password,
+                              'كلمة المرور',
+                            ),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    card.password,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.cairo(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      color: AppColors.accentYellow,
+                                      letterSpacing: 2.0,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 6),
-                              const Icon(
-                                Icons.copy_rounded,
-                                size: 14,
-                                color: AppColors.accentYellow,
-                              ),
-                            ],
+                                const SizedBox(width: 6),
+                                const Icon(
+                                  Icons.copy_rounded,
+                                  size: 14,
+                                  color: AppColors.accentYellow,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),

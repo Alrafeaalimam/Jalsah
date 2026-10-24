@@ -279,7 +279,7 @@ class CardPdfService {
                   ),
                   child: pw.BarcodeWidget(
                     barcode: pw.Barcode.qrCode(),
-                    data: '${card.username}:${card.password}',
+                    data: card.password.isNotEmpty ? '${card.username}:${card.password}' : card.username,
                     width: 54,
                     height: 54,
                   ),
@@ -292,7 +292,7 @@ class CardPdfService {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        'اسم المستخدم (User):',
+                        card.password.isEmpty ? 'رقم الكرت (Voucher Code):' : 'اسم المستخدم (User):',
                         style: const pw.TextStyle(
                           fontSize: 7.5,
                           color: PdfColors.grey300,
@@ -302,26 +302,28 @@ class CardPdfService {
                         card.username,
                         style: pw.TextStyle(
                           fontWeight: pw.FontWeight.bold,
-                          fontSize: 12,
-                          color: PdfColors.white,
+                          fontSize: card.password.isEmpty ? 14 : 12,
+                          color: card.password.isEmpty ? yellowColor : PdfColors.white,
                         ),
                       ),
-                      pw.SizedBox(height: 4),
-                      pw.Text(
-                        'كلمة المرور (PIN):',
-                        style: const pw.TextStyle(
-                          fontSize: 7.5,
-                          color: yellowColor,
+                      if (card.password.isNotEmpty) ...[
+                        pw.SizedBox(height: 4),
+                        pw.Text(
+                          'كلمة المرور (PIN):',
+                          style: const pw.TextStyle(
+                            fontSize: 7.5,
+                            color: yellowColor,
+                          ),
                         ),
-                      ),
-                      pw.Text(
-                        card.password,
-                        style: pw.TextStyle(
-                          fontWeight: pw.FontWeight.bold,
-                          fontSize: 13,
-                          color: yellowColor,
+                        pw.Text(
+                          card.password,
+                          style: pw.TextStyle(
+                            fontWeight: pw.FontWeight.bold,
+                            fontSize: 13,
+                            color: yellowColor,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

@@ -244,7 +244,9 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
       }
 
-      // Tap Generate button
+      // Scroll to & tap Generate button
+      await tester.ensureVisible(find.text('بدء توليد دفعة الكروت الآن'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('بدء توليد دفعة الكروت الآن'));
       for (int i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 100));

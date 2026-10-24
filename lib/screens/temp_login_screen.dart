@@ -315,13 +315,27 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Center(
                       child: _isLoading
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: AppColors.textDark,
-                              ),
+                          ? Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'جاري تسجيل الدخول...',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                              ],
                             )
                           : Row(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -344,6 +358,18 @@ class _TempLoginScreenState extends State<TempLoginScreen> {
                             ),
                     ),
                   ),
+                  if (_isLoading) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'يرجى الانتظار، جاري الاتصال بالخادم والتحقق من البيانات...',
+                      style: GoogleFonts.cairo(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textMuted,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 24),
 
                   // Register link

@@ -1,7 +1,16 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -25,11 +34,44 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            val keyAliasProp = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS")
+            val keyPasswordProp = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
+            val storeFileProp = keystoreProperties.getProperty("storeFile") ?: System.getenv("KEYSTORE_PATH")
+            val storePasswordProp = keystoreProperties.getProperty("storePassword") ?: System.getenv("KEYSTORE_PASSWORD")
+
+            if (storeFileProp != null && keyAliasProp != null) {
+                val resolvedStoreFile = rootProject.file(storeFileProp)
+                val targetFile = if (resolvedStoreFile.exists()) resolvedStoreFile else file(storeFileProp)
+                if (targetFile.exists()) {
+                    keyAlias = keyAliasProp
+                    keyPassword = keyPasswordProp
+                    storeFile = targetFile
+                    storePassword = storePasswordProp
+                }
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            val releaseConfig = signingConfigs.findByName("release")
+            if (releaseConfig?.storeFile != null && releaseConfig.storeFile!!.exists()) {
+                signingConfig = releaseConfig
+                println(">>> [Jalsah Release Signing]: Using RELEASE keystore: ${releaseConfig.storeFile!!.absolutePath}")
+            } else {
+                if (System.getenv("REQUIRE_RELEASE_KEYSTORE") == "true" || project.hasProperty("requireReleaseSigning")) {
+                    throw GradleException("FATAL: Release keystore is required (REQUIRE_RELEASE_KEYSTORE=true or -PrequireReleaseSigning), but key.properties or keystore file was not found! Aborting release build to prevent silent debug signing.")
+                }
+                // Fallback to debug keystore for development / preview builds when release keystore is absent
+                signingConfig = signingConfigs.getByName("debug")
+                logger.warn("********************************************************************************")
+                logger.warn(">>> [Jalsah Signing NOTICE]: 'key.properties' or release keystore not found.")
+                logger.warn(">>> [Jalsah Signing NOTICE]: Falling back to local Android Debug keystore.")
+                logger.warn(">>> [Jalsah Signing NOTICE]: To enforce production signing in CI/CD, set REQUIRE_RELEASE_KEYSTORE=true.")
+                logger.warn("********************************************************************************")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -14,6 +14,7 @@ class CardModel {
   final String status;
   final String? batchId;
   final String? packageId;
+  final String? routerId;
   final double price;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -25,6 +26,7 @@ class CardModel {
     required this.status,
     this.batchId,
     this.packageId,
+    this.routerId,
     this.price = 0.0,
     this.createdAt,
     this.updatedAt,
@@ -45,6 +47,7 @@ class CardModel {
       status: json['status'] as String? ?? 'GENERATED',
       batchId: json['batchId'] as String?,
       packageId: json['packageId'] as String?,
+      routerId: json['routerId'] as String?,
       price: (json['price'] as num?)?.toDouble() ?? 0.0,
       createdAt: parseDate(json['createdAt']),
       updatedAt: parseDate(json['updatedAt']),
@@ -59,6 +62,7 @@ class CardModel {
       'status': status,
       if (batchId != null) 'batchId': batchId,
       if (packageId != null) 'packageId': packageId,
+      if (routerId != null) 'routerId': routerId,
       'price': price,
       if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),

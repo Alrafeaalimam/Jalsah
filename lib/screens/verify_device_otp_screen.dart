@@ -4,6 +4,7 @@
 // Screen: New Device OTP Verification Screen (Rule 14 - Security)
 // ============================================================================
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,8 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_client.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bounce_button.dart';
 import '../widgets/neumorphic_text_field.dart';
-import '../widgets/pressable_neumorphic_card.dart';
 import 'dashboard_screen.dart';
 import 'admin/super_admin_dashboard.dart';
 import 'temp_login_screen.dart';
@@ -42,10 +43,72 @@ class _VerifyDeviceOtpScreenState extends State<VerifyDeviceOtpScreen> {
   final _otpController = TextEditingController();
 
   bool _isLoading = false;
+  bool _isResending = false;
+  int _resendCountdown = 0;
+  Timer? _resendTimer;
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+  }
+
+  void _startResendTimer() {
+    _resendCountdown = 60;
+    _resendTimer?.cancel();
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        if (_resendCountdown > 0) {
+          _resendCountdown--;
+        } else {
+          timer.cancel();
+        }
+      });
+    });
+  }
+
+  Future<void> _handleResendOtp() async {
+    if (_resendCountdown > 0 || _isResending) return;
+    setState(() {
+      _isResending = true;
+      _errorMessage = null;
+    });
+
+    final res = await ApiClient.resendDeviceOtp(
+      tempToken: widget.tempToken,
+      deviceLabel: widget.deviceLabel,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _isResending = false;
+    });
+
+    if (res['success'] == true) {
+      _startResendTimer();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res['message'] as String? ?? 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+    } else {
+      setState(() {
+        _errorMessage = res['errorMessage'] as String? ?? 'فشل إعادة إرسال رمز التحقق';
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    _resendTimer?.cancel();
     _otpController.dispose();
     super.dispose();
   }
@@ -182,49 +245,80 @@ class _VerifyDeviceOtpScreenState extends State<VerifyDeviceOtpScreen> {
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: const Color(0xFFBFDBFE),
                             width: 1.2,
                           ),
                         ),
                         child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Icon(
-                                  Icons.info_outline_rounded,
+                                  Icons.mark_email_read_rounded,
                                   color: Color(0xFF2563EB),
-                                  size: 22,
+                                  size: 24,
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
-                                  child: Text(
-                                    'تم إرسال كود تحقق لبريدك لأن هذا جهاز جديد',
-                                    style: GoogleFonts.cairo(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: const Color(0xFF1E40AF),
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'تم إرسال كود تحقق لبريدك لأن هذا جهاز جديد',
+                                        style: GoogleFonts.cairo(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: const Color(0xFF1E40AF),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'تم إرسال رمز التحقق إلى بريدك الإلكتروني المرتبط بالحساب لأن هذا الجهاز يتم تسجيل الدخول منه لأول مرة أو يحتاج تأكيد أمان.',
+                                        style: GoogleFonts.cairo(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: const Color(0xFF1E40AF),
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
                             ),
                             if (widget.emailMasked != null && widget.emailMasked!.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerRight,
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFFDBEAFE)),
+                                ),
                                 child: Text(
-                                  'تم إرسال الرمز المكون من 6 أرقام إلى: ${widget.emailMasked}',
+                                  'تم الإرسال إلى: ${widget.emailMasked}',
+                                  textAlign: TextAlign.center,
                                   style: GoogleFonts.cairo(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: const Color(0xFF3B82F6),
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFF1D4ED8),
                                   ),
                                 ),
                               ),
                             ],
+                            const SizedBox(height: 10),
+                            Text(
+                              'إذا لم يصلك الرمز، يرجى التأكد من صحة عنوان البريد الإلكتروني، وفحص صندوق الوارد (Inbox) ومجلد الرسائل غير المرغوب فيها (Spam / Junk)، والانتظار قليلاً قبل طلب إعادة الإرسال.',
+                              style: GoogleFonts.cairo(
+                                fontSize: 12,
+                                color: const Color(0xFF334155),
+                                height: 1.5,
+                              ),
+                            ),
                             const SizedBox(height: 6),
                             Align(
                               alignment: Alignment.centerRight,
@@ -235,6 +329,27 @@ class _VerifyDeviceOtpScreenState extends State<VerifyDeviceOtpScreen> {
                                   color: const Color(0xFF64748B),
                                 ),
                               ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.shield_outlined,
+                                  color: Color(0xFFDC2626),
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'أمان الحساب: لا تشارك رمز التحقق مع أي شخص على الإطلاق.',
+                                    style: GoogleFonts.cairo(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFFDC2626),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -297,41 +412,49 @@ class _VerifyDeviceOtpScreenState extends State<VerifyDeviceOtpScreen> {
                       const SizedBox(height: 28),
 
                       // Confirm & Login Button
-                      PressableNeumorphicCard(
-                        onTap: _isLoading ? () {} : _submitVerification,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Center(
-                          child: _isLoading
+                      BounceButton(
+                        onPressed: _isLoading ? null : _submitVerification,
+                        isLoading: _isLoading,
+                        height: 52,
+                        icon: Icons.verified_user_rounded,
+                        label: 'تأكيد الجهاز والدخول',
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Resend OTP Button with countdown timer
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: (_resendCountdown > 0 || _isResending)
+                              ? null
+                              : _handleResendOtp,
+                          icon: _isResending
                               ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                    valueColor: AlwaysStoppedAnimation<Color>(AppColors.textDark),
-                                  ),
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    const Icon(
-                                      Icons.verified_user_rounded,
-                                      size: 20,
-                                      color: AppColors.textDark,
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Text(
-                                      'تأكيد الجهاز والدخول',
-                                      style: GoogleFonts.cairo(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.textDark,
-                                      ),
-                                    ),
-                                  ],
+                              : Icon(
+                                  Icons.refresh_rounded,
+                                  size: 18,
+                                  color: _resendCountdown > 0
+                                      ? AppColors.textMuted
+                                      : AppColors.heroGradientStart,
                                 ),
+                          label: Text(
+                            _resendCountdown > 0
+                                ? 'إعادة إرسال الرمز بعد ($_resendCountdown ثانية)'
+                                : 'إعادة إرسال رمز التحقق الآن',
+                            style: GoogleFonts.cairo(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _resendCountdown > 0
+                                  ? AppColors.textMuted
+                                  : AppColors.heroGradientStart,
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
 
                       // Return to Login Link
                       Center(

@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -24,8 +25,12 @@ import '../models/platform_settings_model.dart';
 import '../models/notification_model.dart';
 
 class ApiClient {
-  static const String baseUrl = 'https://mikrotik-cards-backend.onrender.com';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://alrafeerouter.zone.id',
+  );
   static const Duration timeoutDuration = Duration(seconds: 25);
+  static const Duration loginTimeoutDuration = Duration(seconds: 60);
   static const String tokenStorageKey = 'auth_token';
 
   static http.Client client = http.Client();
@@ -173,6 +178,7 @@ class ApiClient {
       'deviceLabel': label,
     });
 
+    final stopwatch = Stopwatch()..start();
     try {
       final response = await client
           .post(
@@ -183,7 +189,8 @@ class ApiClient {
             },
             body: payload,
           )
-          .timeout(timeoutDuration);
+          .timeout(loginTimeoutDuration);
+      stopwatch.stop();
 
       final Map<String, dynamic> body = jsonDecode(
         utf8.decode(response.bodyBytes),
@@ -192,6 +199,11 @@ class ApiClient {
       if (response.statusCode == 200 && body['success'] == true) {
         final data = body['data'] as Map<String, dynamic>;
         final requiresDeviceVerification = data['requiresDeviceVerification'] == true;
+        debugPrint(
+          '[ApiClient.login] status=${response.statusCode} success=true '
+          'requiresDeviceVerification=$requiresDeviceVerification '
+          'elapsedMs=${stopwatch.elapsedMilliseconds}',
+        );
 
         if (requiresDeviceVerification) {
           return {
@@ -219,13 +231,28 @@ class ApiClient {
           'data': data,
         };
       } else if (response.statusCode == 401) {
+        debugPrint(
+          '[ApiClient.login] status=401 errorCode=${body['errorCode'] ?? 'UNAUTHORIZED'} '
+          'elapsedMs=${stopwatch.elapsedMilliseconds}',
+        );
         await logout();
         return {
           'success': false,
           'errorCode': 'UNAUTHORIZED',
-          'errorMessage': body['errorMessage'] ?? 'بيانات الدخول غير صحيحة',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'بيانات الدخول غير صحيحة',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز محاولات تسجيل الدخول المسموح بها مؤقتاً. يرجى الانتظار دقيقة والمحاولة مجدداً.',
         };
       } else {
+        debugPrint(
+          '[ApiClient.login] status=${response.statusCode} '
+          'errorCode=${body['errorCode'] ?? 'SERVER_ERROR'} '
+          'elapsedMs=${stopwatch.elapsedMilliseconds}',
+        );
         return {
           'success': false,
           'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
@@ -235,18 +262,23 @@ class ApiClient {
         };
       }
     } on TimeoutException {
+      stopwatch.stop();
+      debugPrint(
+        '[ApiClient.login] TIMEOUT after ${stopwatch.elapsedMilliseconds}ms '
+        '(limit=${loginTimeoutDuration.inSeconds}s)',
+      );
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (60 ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -322,13 +354,13 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -339,20 +371,92 @@ class ApiClient {
     }
   }
 
+  /// Requests a new device verification OTP email with rate limit cooldown.
+  static Future<Map<String, dynamic>> resendDeviceOtp({
+    required String tempToken,
+    String? deviceLabel,
+  }) async {
+    final label = deviceLabel ?? getDeviceLabel();
+    final uri = Uri.parse('$baseUrl/api/v1/auth/resend-device-otp');
+    final payload = jsonEncode({
+      'tempToken': tempToken,
+      'deviceLabel': label,
+    });
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: payload,
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'message': body['message'] ?? 'تم إرسال رمز تحقق جديد إلى بريدك الإلكتروني',
+        };
+      }
+
+      if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? 'يرجى الانتظار قليلاً قبل طلب رمز جديد',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'RESEND_OTP_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إعادة إرسال رمز التحقق',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ أثناء إعادة إرسال رمز التحقق: $e',
+      };
+    }
+  }
+
   /// Tests connectivity to a MikroTik router through the backend API.
   static Future<Map<String, dynamic>> testRouterConnection({
     required String host,
     required int port,
     required String username,
     required String password,
+    String? connectionMethod,
+    String? certificateFingerprint,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/routers/test-connection');
-    final payload = jsonEncode({
+    final Map<String, dynamic> data = {
       'host': host,
       'port': port,
       'username': username,
       'password': password,
-    });
+    };
+    if (connectionMethod != null && connectionMethod.isNotEmpty) {
+      data['connectionMethod'] = connectionMethod;
+    }
+    if (certificateFingerprint != null && certificateFingerprint.isNotEmpty) {
+      data['certificateFingerprint'] = certificateFingerprint;
+    }
+    final payload = jsonEncode(data);
 
     try {
       final response = await client
@@ -374,16 +478,38 @@ class ApiClient {
         return {
           'success': false,
           'errorCode': 'UNAUTHORIZED',
-          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': serverMsg ?? 'مسار فحص الراوتر غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': serverMsg ?? 'تم تجاوز الحد الأقصى لمحاولات فحص الراوتر. يرجى الانتظار دقيقة والمحاولة مجدداً.',
         };
       } else if (response.statusCode == 422 || response.statusCode == 400) {
         return body;
       } else {
         return {
           'success': false,
-          'errorCode': 'SERVER_ERROR',
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
           'errorMessage':
-              'استجاب الخادم برمز خطأ غير متوقع (${response.statusCode})',
+              body['errorMessage'] ?? body['message'] ?? 'استجاب الخادم برمز خطأ غير متوقع (${response.statusCode})',
         };
       }
     } on TimeoutException {
@@ -391,14 +517,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -458,14 +584,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -489,15 +615,24 @@ class ApiClient {
     required int port,
     required String username,
     required String password,
+    String? connectionMethod,
+    String? certificateFingerprint,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/routers');
-    final payload = jsonEncode({
+    final Map<String, dynamic> data = {
       'name': name,
       'host': host,
       'port': port,
       'username': username,
       'password': password,
-    });
+    };
+    if (connectionMethod != null && connectionMethod.isNotEmpty) {
+      data['connectionMethod'] = connectionMethod;
+    }
+    if (certificateFingerprint != null && certificateFingerprint.isNotEmpty) {
+      data['certificateFingerprint'] = certificateFingerprint;
+    }
+    final payload = jsonEncode(data);
 
     try {
       final response = await client
@@ -530,13 +665,20 @@ class ApiClient {
         return {
           'success': false,
           'errorCode': 'ROUTER_NAME_EXISTS',
-          'errorMessage': 'اسم الراوتر مسجل مسبقاً، يرجى اختيار اسم مختلف.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'اسم الراوتر مسجل مسبقاً، يرجى اختيار اسم مختلف.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز حد الطلبات المسموح. يرجى الانتظار قليلاً.',
         };
       } else {
         return {
           'success': false,
           'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
           'errorMessage': body['errorMessage'] ??
+              body['message'] ??
               'فشل إضافة الراوتر (${response.statusCode})',
         };
       }
@@ -545,14 +687,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -593,20 +735,34 @@ class ApiClient {
         return {
           'success': false,
           'errorCode': 'UNAUTHORIZED',
-          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
         };
       } else if (response.statusCode == 404) {
         return {
           'success': false,
           'errorCode': 'ROUTER_NOT_FOUND',
-          'errorMessage': 'الراوتر المطلوب غير موجود أو تم حذفه مسبقاً.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'الراوتر المطلوب غير موجود أو تم حذفه مسبقاً.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز حد الطلبات. يرجى الانتظار قليلاً.',
         };
       } else {
         return {
           'success': false,
           'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
           'errorMessage':
-              body['errorMessage'] ?? 'فشل حذف الراوتر (${response.statusCode})',
+              body['errorMessage'] ?? body['message'] ?? 'فشل حذف الراوتر (${response.statusCode})',
         };
       }
     } on TimeoutException {
@@ -614,14 +770,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -634,6 +790,497 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء حذف الراوتر: $e',
+      };
+    }
+  }
+
+  /// Updates an existing router entity in the backend.
+  static Future<Map<String, dynamic>> updateRouter({
+    required String id,
+    String? name,
+    String? host,
+    int? port,
+    String? username,
+    String? password,
+    String? connectionMethod,
+    String? certificateFingerprint,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$id');
+    final Map<String, dynamic> data = {};
+    if (name != null) data['name'] = name;
+    if (host != null) data['host'] = host;
+    if (port != null) data['port'] = port;
+    if (username != null) data['username'] = username;
+    if (password != null && password.isNotEmpty) data['password'] = password;
+    if (connectionMethod != null && connectionMethod.isNotEmpty) {
+      data['connectionMethod'] = connectionMethod;
+    }
+    if (certificateFingerprint != null && certificateFingerprint.isNotEmpty) {
+      data['certificateFingerprint'] = certificateFingerprint;
+    }
+
+    try {
+      final response = await client
+          .patch(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode(data),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': RouterModel.fromJson(body['data'] as Map<String, dynamic>),
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTER_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'الراوتر المطلوب أو المسار غير متوفر على الخادم (404).',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز حد الطلبات. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل تحديث بيانات الراوتر (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء تحديث الراوتر: $e',
+      };
+    }
+  }
+
+  /// Tests connection to an already stored router entity in the backend.
+  static Future<Map<String, dynamic>> testRouterConnectionForId(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$id/test-connection');
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({}),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'مسار فحص الراوتر غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز الحد الأقصى لمحاولات فحص الراوتر. يرجى الانتظار دقيقة والمحاولة مجدداً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'CONNECTION_FAILED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل فحص الاتصال بالراوتر (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء فحص الراوتر: $e',
+      };
+    }
+  }
+
+  /// Fetches live HotSpot users configured on a router.
+  static Future<Map<String, dynamic>> getRouterHotspotUsers(String routerId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$routerId/hotspot-users');
+
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: _buildHeaders(),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> users = body['data'] as List<dynamic>? ?? [];
+        return {
+          'success': true,
+          'data': users,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'مسار مستخدمي الهوتسبوت غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز معدل الطلبات للراوتر. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل جلب مستخدمي الهوتسبوت (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب مستخدمي الهوتسبوت: $e',
+      };
+    }
+  }
+
+  /// Fetches live HotSpot active sessions on a router.
+  static Future<Map<String, dynamic>> getRouterHotspotSessions(String routerId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$routerId/hotspot-sessions');
+
+    try {
+      final response = await client
+          .get(
+            uri,
+            headers: _buildHeaders(),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> sessions = body['data'] as List<dynamic>? ?? [];
+        return {
+          'success': true,
+          'data': sessions,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'مسار الجلسات النشطة غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز معدل الطلبات للراوتر. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل جلب الجلسات النشطة (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب الجلسات النشطة: $e',
+      };
+    }
+  }
+
+  /// Enables or disables a HotSpot user on a router.
+  static Future<Map<String, dynamic>> toggleHotspotUser({
+    required String routerId,
+    required String username,
+    required bool isEnabled,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$routerId/hotspot-users/$username');
+
+    try {
+      final response = await client
+          .patch(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({'isEnabled': isEnabled}),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'message': body['message'] ?? 'تم تحديث حالة المستخدم بنجاح',
+          'data': body['data'],
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'مسار تعديل المستخدم غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز معدل الطلبات للراوتر. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل تحديث حالة المستخدم (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء تحديث حالة المستخدم: $e',
+      };
+    }
+  }
+
+  /// Disconnects an active HotSpot session on a router.
+  static Future<Map<String, dynamic>> disconnectHotspotSession({
+    required String routerId,
+    required String username,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/routers/$routerId/hotspot-sessions/$username/disconnect');
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({}),
+          )
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'message': body['message'] ?? 'تم فصل الجلسة بنجاح',
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'مسار فصل الجلسة غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'تم تجاوز معدل الطلبات للراوتر. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'فشل فصل الجلسة (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء فصل الجلسة: $e',
       };
     }
   }
@@ -681,14 +1328,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -788,14 +1435,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -857,14 +1504,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -881,27 +1528,36 @@ class ApiClient {
     }
   }
 
-  /// Generates a new batch of hotspot cards associated with an internet package.
+  /// Generates a new batch of hotspot cards associated with an internet package and router.
   static Future<Map<String, dynamic>> generateCardBatch({
     required String packageId,
     required int quantity,
+    String? routerId,
     String? prefix,
     int? userLength,
     int? passwordLength,
+    String? generationMode,
+    Duration timeoutDuration = const Duration(seconds: 45),
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/cards/generate-batch');
     final Map<String, dynamic> payloadMap = {
       'packageId': packageId,
       'quantity': quantity,
     };
+    if (routerId != null && routerId.trim().isNotEmpty) {
+      payloadMap['routerId'] = routerId.trim();
+    }
     if (prefix != null && prefix.trim().isNotEmpty) {
       payloadMap['prefix'] = prefix.trim();
     }
     if (userLength != null && userLength > 0) {
       payloadMap['userLength'] = userLength;
     }
-    if (passwordLength != null && passwordLength > 0) {
+    if (passwordLength != null && passwordLength >= 0) {
       payloadMap['passwordLength'] = passwordLength;
+    }
+    if (generationMode != null && generationMode.trim().isNotEmpty) {
+      payloadMap['generationMode'] = generationMode.trim();
     }
 
     try {
@@ -911,7 +1567,7 @@ class ApiClient {
             headers: _buildHeaders(isJson: true),
             body: jsonEncode(payloadMap),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
         utf8.decode(response.bodyBytes),
@@ -938,32 +1594,50 @@ class ApiClient {
         return {
           'success': false,
           'errorCode': 'UNAUTHORIZED',
-          'errorMessage': body['errorMessage'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
         };
-      } else if (response.statusCode == 404) {
+      } else if (response.statusCode == 403) {
         return {
           'success': false,
-          'errorCode': 'PACKAGE_NOT_FOUND',
-          'errorMessage': 'الباقة المحددة غير موجودة في النظام.',
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'PACKAGE_NOT_FOUND',
+          'errorMessage': serverMsg ?? 'الباقة المحددة أو المسار غير موجود على الخادم (404).',
         };
       } else if (response.statusCode == 422) {
         return {
           'success': false,
           'errorCode': 'PACKAGE_INACTIVE',
-          'errorMessage': 'الباقة المحددة غير مفعّلة حالياً، يرجى تفعيلها أولاً.',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'الباقة المحددة غير مفعّلة حالياً، يرجى تفعيلها أولاً.',
         };
       } else if (response.statusCode == 400) {
         return {
           'success': false,
           'errorCode': 'VALIDATION_ERROR',
           'errorMessage': body['errorMessage'] ??
+              body['message'] ??
               'بيانات التوليد غير صالحة، يرجى التأكد من الكمية وصحة المدخلات.',
+        };
+      } else if (response.statusCode == 429) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': serverMsg ?? 'تم تجاوز معدل طلبات توليد الكروت. يرجى الانتظار قليلاً قبل المحاولة.',
         };
       } else {
         return {
           'success': false,
           'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
           'errorMessage': body['errorMessage'] ??
+              body['message'] ??
               'فشل توليد دفعة الكروت (${response.statusCode})',
         };
       }
@@ -972,14 +1646,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم أثناء توليد الكروت. يرجى المحاولة لاحقاً.',
+            'انتهت مهلة الاتصال بالخادم أثناء توليد الكروت (${timeoutDuration.inSeconds} ثانية). يرجى مراجعة قائمة الدفعات قبل إعادة المحاولة لتجنب التكرار.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1060,14 +1734,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1080,6 +1754,91 @@ class ApiClient {
         'success': false,
         'errorCode': 'UNKNOWN_ERROR',
         'errorMessage': 'حدث خطأ غير متوقع أثناء جلب الكروت: $e',
+      };
+    }
+  }
+
+  /// Fetches all card batches for the current tenant from the backend.
+  static Future<Map<String, dynamic>> getBatches() async {
+    final uri = Uri.parse('$baseUrl/api/v1/cards/batches');
+
+    try {
+      final response = await client.get(
+        uri,
+        headers: _buildHeaders(),
+      ).timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> raw = body['data'] as List<dynamic>? ?? [];
+        final batches = raw
+            .map((b) => CardBatchModel.fromJson(b as Map<String, dynamic>))
+            .toList();
+        return {
+          'success': true,
+          'data': batches,
+        };
+      } else if (response.statusCode == 401) {
+        await logout();
+        return {
+          'success': false,
+          'errorCode': 'UNAUTHORIZED',
+          'errorMessage': body['errorMessage'] ?? body['message'] ?? 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً.',
+        };
+      } else if (response.statusCode == 403) {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'TRIAL_CARD_GENERATION_LOCKED',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+        };
+      } else if (response.statusCode == 404) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': 'ROUTE_NOT_FOUND',
+          'errorMessage': serverMsg ??
+              'المسار غير متوفر على الخادم (404). قد يتطلب تحديث نسخة الخادم السحابي.',
+        };
+      } else if (response.statusCode == 429) {
+        final serverMsg = body['errorMessage'] ?? body['message'];
+        return {
+          'success': false,
+          'errorCode': 'RATE_LIMIT_EXCEEDED',
+          'errorMessage': serverMsg ?? 'تم تجاوز معدل الطلبات. يرجى الانتظار قليلاً.',
+        };
+      } else {
+        return {
+          'success': false,
+          'errorCode': body['errorCode'] ?? 'SERVER_ERROR',
+          'errorMessage': body['errorMessage'] ??
+              body['message'] ??
+              'فشل جلب قائمة الدفعات (${response.statusCode})',
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage':
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
+      };
+    } on SocketException {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_UNREACHABLE',
+        'errorMessage':
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'UNKNOWN_ERROR',
+        'errorMessage': 'حدث خطأ غير متوقع أثناء جلب الدفعات: $e',
       };
     }
   }
@@ -1142,14 +1901,14 @@ class ApiClient {
         'success': false,
         'errorCode': 'TIMEOUT',
         'errorMessage':
-            'انتهت مهلة الاتصال بالخادم (5 ثوانٍ). يرجى التأكد من استجابة السيرفر.',
+            'انتهت مهلة الاتصال بالخادم (${timeoutDuration.inSeconds} ثانية). يرجى التأكد من استجابة السيرفر.',
       };
     } on SocketException {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1241,7 +2000,7 @@ class ApiClient {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1301,7 +2060,7 @@ class ApiClient {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1386,7 +2145,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1458,7 +2217,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1558,7 +2317,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1638,7 +2397,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1711,7 +2470,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1811,7 +2570,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -1876,7 +2635,7 @@ class ApiClient {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -1937,7 +2696,7 @@ class ApiClient {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
         'errorMessage':
-            'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+            'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -2024,7 +2783,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000 (تأكد من تشغيل السيرفر).',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } on FormatException {
       return {
@@ -2102,7 +2861,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -2174,7 +2933,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -2253,7 +3012,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_UNREACHABLE',
-        'errorMessage': 'تعذر الاتصال بخادم الـ Backend على المنفذ 3000.',
+        'errorMessage': 'تعذر الاتصال بالخادم. يرجى التأكد من اتصالك بالإنترنت وتوفر الخدمة.',
       };
     } catch (e) {
       return {
@@ -2660,6 +3419,200 @@ class ApiClient {
       };
     } catch (e) {
       return {'success': false, 'errorCode': 'NETWORK_ERROR', 'errorMessage': 'خطأ في الاتصال: $e'};
+    }
+  }
+
+  /// Fetches active subscription plans for user to choose and subscribe.
+  static Future<Map<String, dynamic>> getSubscriptionPlans() async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/plans');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_PLANS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب باقات الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب باقات الاشتراك',
+      };
+    }
+  }
+
+  /// Submits an activation request for a selected commercial plan.
+  static Future<Map<String, dynamic>> requestSubscriptionActivation({
+    required String planId,
+    String? notes,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/request-activation');
+    final payload = jsonEncode({
+      'planId': planId,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    });
+
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: payload)
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['message'] ?? 'تم إرسال طلب التفعيل بنجاح',
+        };
+      }
+
+      if (response.statusCode == 409) {
+        return {
+          'success': false,
+          'errorCode': 'PENDING_REQUEST_EXISTS',
+          'errorMessage': body['errorMessage'] ?? 'يوجد طلب تفعيل قيد المراجعة بالفعل لهذا الحساب',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'REQUEST_ACTIVATION_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إرسال طلب التفعيل',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لإرسال طلب التفعيل',
+      };
+    }
+  }
+
+  /// Fetches tenant activation requests history.
+  static Future<Map<String, dynamic>> getMySubscriptionRequests() async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/my-requests');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_REQUESTS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب طلبات التفعيل',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب طلبات التفعيل',
+      };
+    }
+  }
+
+  /// Cancels a pending activation request submitted by the tenant.
+  static Future<Map<String, dynamic>> cancelSubscriptionRequest(String requestId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/my-requests/$requestId/cancel');
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['message'] ?? 'تم إلغاء طلب التفعيل بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'CANCEL_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إلغاء طلب التفعيل',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لإلغاء طلب التفعيل: $e',
+      };
+    }
+  }
+
+  /// Updates authenticated user profile details (full name, phone, avatarUrl).
+  static Future<Map<String, dynamic>> updateUserProfile({
+    String? fullName,
+    String? phone,
+    String? avatarUrl,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/profile');
+    final Map<String, dynamic> payloadMap = {};
+    if (fullName != null) payloadMap['fullName'] = fullName.trim();
+    if (phone != null) payloadMap['phone'] = phone.trim();
+    if (avatarUrl != null) payloadMap['avatarUrl'] = avatarUrl.trim();
+
+    try {
+      final response = await client
+          .put(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payloadMap))
+          .timeout(timeoutDuration);
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['message'] ?? 'تم تحديث بيانات الملف الشخصي بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'UPDATE_PROFILE_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تحديث بيانات الملف الشخصي',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لتحديث الملف الشخصي',
+      };
     }
   }
 }

@@ -11,14 +11,18 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/card_batch_model.dart';
 import '../models/card_model.dart';
 import '../models/package_model.dart';
+import '../models/router_model.dart';
+import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../services/card_pdf_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/bounce_button.dart';
 import '../widgets/card_voucher_widget.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
 import 'cards_list_screen.dart';
 import 'packages_screen.dart';
+import 'subscription_plans_screen.dart';
 
 class GenerateCardsScreen extends StatefulWidget {
   const GenerateCardsScreen({super.key});
@@ -33,6 +37,10 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
   bool _isLoadingPackages = true;
   String? _packagesError;
 
+  List<RouterModel> _routers = [];
+  RouterModel? _selectedRouter;
+  bool _isLoadingRouters = false;
+
   final TextEditingController _quantityController =
       TextEditingController(text: '10');
   final TextEditingController _prefixController = TextEditingController();
@@ -44,6 +52,8 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
   bool _showAdvancedSettings = false;
   bool _isGenerating = false;
   String? _generationError;
+  String _generationMode = 'USERNAME_AND_PASSWORD';
+  SubscriptionStatusModel? _subscriptionStatus;
 
   CardBatchModel? _generatedBatch;
   List<CardModel>? _generatedCards;
@@ -52,6 +62,70 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
   void initState() {
     super.initState();
     _loadPackages();
+    _loadRouters();
+    _loadSubscriptionStatus();
+  }
+
+  Future<void> _loadSubscriptionStatus() async {
+    try {
+      final res = await ApiClient.getSubscriptionStatus();
+      if (res['success'] == true && res['data'] != null && mounted) {
+        setState(() {
+          _subscriptionStatus = SubscriptionStatusModel.fromJson(res['data']);
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _showTrialLockDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: AppColors.pageBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded, color: Color(0xFFD97706), size: 24),
+              const SizedBox(width: 8),
+              Text(
+                'توليد الكروت مقفل في النسخة التجريبية',
+                style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16),
+              ),
+            ],
+          ),
+          content: Text(
+            'يمكنك استخدام وظائف Jalsah خلال الفترة التجريبية. لتوليد كروت الإنترنت، يرجى الاشتراك في إحدى الباقات أو طلب تفعيل حسابك من الإدارة.',
+            style: GoogleFonts.cairo(fontSize: 13.5, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.heroGradientStart,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const SubscriptionPlansScreen(openDirectlyForTrialLock: true),
+                  ),
+                );
+              },
+              child: Text(
+                'عرض الباقات وطلب التفعيل',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -99,7 +173,42 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     }
   }
 
+  Future<void> _loadRouters() async {
+    setState(() {
+      _isLoadingRouters = true;
+    });
+
+    final result = await ApiClient.getRouters();
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      final list = (result['data'] as List<dynamic>).cast<RouterModel>();
+      setState(() {
+        _routers = list;
+        _isLoadingRouters = false;
+        if (_routers.isNotEmpty && _selectedRouter == null) {
+          final online = _routers.where((r) => r.isOnline);
+          if (online.isNotEmpty) {
+            _selectedRouter = online.first;
+          }
+        }
+      });
+    } else {
+      setState(() {
+        _isLoadingRouters = false;
+      });
+    }
+  }
+
   Future<void> _generateBatch() async {
+    if (_isGenerating) return;
+
+    // Phase 14: Enforce Trial Period Card Generation Lock on client
+    if (_subscriptionStatus?.isTrial == true) {
+      _showTrialLockDialog();
+      return;
+    }
+
     if (_selectedPackage == null) {
       setState(() {
         _generationError = 'يرجى اختيار باقة إنترنت أولاً.';
@@ -115,16 +224,19 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       return;
     }
 
+    final bool isNumbersOnly = _generationMode == 'NUMBERS_ONLY';
     int? userLen = int.tryParse(_userLengthController.text.trim());
     if (userLen != null && (userLen < 4 || userLen > 16)) {
       setState(() {
-        _generationError = 'طول اسم المستخدم يجب أن يكون بين 4 و 16 محرفاً.';
+        _generationError = isNumbersOnly
+            ? 'طول رقم الكرت يجب أن يكون بين 4 و 16 رقماً.'
+            : 'طول اسم المستخدم يجب أن يكون بين 4 و 16 محرفاً.';
       });
       return;
     }
 
-    int? passLen = int.tryParse(_passwordLengthController.text.trim());
-    if (passLen != null && (passLen < 4 || passLen > 16)) {
+    int? passLen = isNumbersOnly ? 0 : int.tryParse(_passwordLengthController.text.trim());
+    if (!isNumbersOnly && passLen != null && (passLen < 4 || passLen > 16)) {
       setState(() {
         _generationError = 'طول كلمة المرور يجب أن يكون بين 4 و 16 رقماً.';
       });
@@ -139,11 +251,13 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     final result = await ApiClient.generateCardBatch(
       packageId: _selectedPackage!.id,
       quantity: quantity,
+      routerId: _selectedRouter?.id,
       prefix: _prefixController.text.trim().isEmpty
           ? null
           : _prefixController.text.trim(),
       userLength: userLen,
       passwordLength: passLen,
+      generationMode: _generationMode,
     );
 
     if (!mounted) return;
@@ -158,6 +272,13 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         _generationError = null;
       });
     } else {
+      if (result['errorCode'] == 'TRIAL_CARD_GENERATION_LOCKED') {
+        setState(() {
+          _isGenerating = false;
+        });
+        _showTrialLockDialog();
+        return;
+      }
       setState(() {
         _isGenerating = false;
         _generationError = result['errorMessage'] ??
@@ -709,6 +830,230 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         ),
         const SizedBox(height: 18),
 
+        // Section Title: Router Selection
+        Padding(
+          padding: const EdgeInsets.only(right: 4, bottom: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'ربط بالراوتر (اختياري)',
+                style: GoogleFonts.cairo(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textDark,
+                ),
+              ),
+              if (_isLoadingRouters)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.heroGradientStart,
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // Neumorphic Router Dropdown Container
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          decoration: BoxDecoration(
+            color: AppColors.pageBg,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.shadowDark.withValues(alpha: 0.7),
+                offset: const Offset(2, 2),
+                blurRadius: 4,
+              ),
+              const BoxShadow(
+                color: AppColors.shadowLight,
+                offset: Offset(-2, -2),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String?>(
+              value: _selectedRouter?.id,
+              isExpanded: true,
+              hint: Text(
+                'بدون راوتر محدد (كروت عامة)',
+                style: GoogleFonts.cairo(
+                  fontSize: 13,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              icon: const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: AppColors.heroGradientStart,
+              ),
+              items: [
+                DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text(
+                    'بدون راوتر محدد (كروت عامة)',
+                    style: GoogleFonts.cairo(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ),
+                ..._routers.map((router) {
+                  return DropdownMenuItem<String?>(
+                    value: router.id,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: router.isOnline
+                                ? AppColors.statusOnline
+                                : AppColors.statusOffline,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '${router.name} (${router.host})',
+                            style: GoogleFonts.cairo(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textDark,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+              onChanged: _isGenerating
+                  ? null
+                  : (val) {
+                      setState(() {
+                        if (val == null) {
+                          _selectedRouter = null;
+                        } else {
+                          _selectedRouter = _routers.firstWhere(
+                            (r) => r.id == val,
+                            orElse: () => _routers.first,
+                          );
+                        }
+                      });
+                    },
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // Generation Mode Selector (Phase 14)
+        Text(
+          'طريقة توليد الكروت *',
+          style: GoogleFonts.cairo(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textDark,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: AppColors.shadowDark.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: _isGenerating
+                      ? null
+                      : () => setState(() => _generationMode = 'USERNAME_AND_PASSWORD'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _generationMode == 'USERNAME_AND_PASSWORD'
+                          ? Colors.white
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: _generationMode == 'USERNAME_AND_PASSWORD'
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      'اسم مستخدم وكلمة مرور',
+                      style: GoogleFonts.cairo(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: _generationMode == 'USERNAME_AND_PASSWORD'
+                            ? AppColors.heroGradientStart
+                            : AppColors.textMuted,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _isGenerating
+                      ? null
+                      : () => setState(() {
+                            _generationMode = 'NUMBERS_ONLY';
+                            if (_userLengthController.text == '6') {
+                              _userLengthController.text = '8';
+                            }
+                          }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: _generationMode == 'NUMBERS_ONLY'
+                          ? Colors.white
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: _generationMode == 'NUMBERS_ONLY'
+                          ? [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.08),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ]
+                          : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      'أرقام فقط (بدون كلمة سر)',
+                      style: GoogleFonts.cairo(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: _generationMode == 'NUMBERS_ONLY'
+                            ? AppColors.heroGradientStart
+                            : AppColors.textMuted,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+
         // Quantity Field
         NeumorphicTextField(
           label: 'عدد الكروت المطلوب توليدها (الكمية) *',
@@ -824,31 +1169,42 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         // Advanced Options Form
         if (_showAdvancedSettings) ...[
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: NeumorphicTextField(
-                  label: 'طول اسم المستخدم',
-                  hintText: 'افتراضي: 6',
-                  controller: _userLengthController,
-                  keyboardType: TextInputType.number,
-                  enabled: !_isGenerating,
-                  textDirection: TextDirection.ltr,
+          if (_generationMode == 'NUMBERS_ONLY') ...[
+            NeumorphicTextField(
+              label: 'طول رقم الكرت (عدد الأرقام)',
+              hintText: 'افتراضي: 8 أرقام',
+              controller: _userLengthController,
+              keyboardType: TextInputType.number,
+              enabled: !_isGenerating,
+              textDirection: TextDirection.ltr,
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Expanded(
+                  child: NeumorphicTextField(
+                    label: 'طول اسم المستخدم',
+                    hintText: 'افتراضي: 6',
+                    controller: _userLengthController,
+                    keyboardType: TextInputType.number,
+                    enabled: !_isGenerating,
+                    textDirection: TextDirection.ltr,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: NeumorphicTextField(
-                  label: 'طول كلمة السر (PIN)',
-                  hintText: 'افتراضي: 4',
-                  controller: _passwordLengthController,
-                  keyboardType: TextInputType.number,
-                  enabled: !_isGenerating,
-                  textDirection: TextDirection.ltr,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: NeumorphicTextField(
+                    label: 'طول كلمة السر (PIN)',
+                    hintText: 'افتراضي: 4',
+                    controller: _passwordLengthController,
+                    keyboardType: TextInputType.number,
+                    enabled: !_isGenerating,
+                    textDirection: TextDirection.ltr,
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
 
         // Error message if generation failed
@@ -889,50 +1245,17 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         const SizedBox(height: 26),
 
         // Generate Action Button
-        PressableNeumorphicCard(
-          onTap: _isGenerating ? null : _generateBatch,
+        BounceButton(
+          onPressed: _isGenerating ? null : _generateBatch,
+          isLoading: _isGenerating,
+          height: 54,
           backgroundColor: AppColors.accentYellow,
-          borderRadius: BorderRadius.circular(18),
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_isGenerating) ...[
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: AppColors.textDark,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'جارٍ توليد وتشفير الكروت بأمان...',
-                  style: GoogleFonts.cairo(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
-                  ),
-                ),
-              ] else ...[
-                const Icon(
-                  Icons.bolt_rounded,
-                  color: AppColors.textDark,
-                  size: 22,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  'بدء توليد دفعة الكروت الآن',
-                  style: GoogleFonts.cairo(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textDark,
-                  ),
-                ),
-              ],
-            ],
+          textColor: AppColors.textDark,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFF5C94B), Color(0xFFE5B535)],
           ),
+          icon: Icons.bolt_rounded,
+          label: _isGenerating ? 'جارٍ توليد وتشفير الكروت بأمان...' : 'بدء توليد دفعة الكروت الآن',
         ),
       ],
     );

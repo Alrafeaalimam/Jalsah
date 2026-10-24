@@ -24,6 +24,7 @@ import 'add_router_screen.dart';
 import 'cards_list_screen.dart';
 import 'generate_cards_screen.dart';
 import 'packages_screen.dart';
+import 'router_detail_screen.dart';
 import 'sales_report_screen.dart';
 import 'staff_screen.dart';
 import 'temp_login_screen.dart';
@@ -383,22 +384,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _onRouterCardTapped(RouterModel router) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: AppColors.textDark,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        content: Text(
-          'تم اختيار: ${router.name} (${router.isOnline ? "متصل" : "غير متصل"})',
-          style: GoogleFonts.cairo(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+  Future<void> _onRouterCardTapped(RouterModel router) async {
+    final refreshed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => RouterDetailScreen(router: router),
       ),
     );
+    if (refreshed == true) {
+      _loadRouters();
+    }
   }
 
   @override
@@ -697,26 +691,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Text(
-                          'مساء الخير 👋',
-                          style: GoogleFonts.cairo(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.white.withValues(alpha: 0.85),
+                        // Jalsah System Brand Logo
+                        Container(
+                          width: 38,
+                          height: 38,
+                          margin: const EdgeInsets.only(left: 10),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: const Color(0xFFF5C94B).withValues(alpha: 0.8),
+                              width: 1.5,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.25),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: ClipOval(
+                            child: Image.asset(
+                              'assets/icon/logo.jpg',
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => const Icon(
+                                Icons.wifi_tethering_rounded,
+                                size: 20,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
                         ),
-                        Text(
-                          widget.userName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.cairo(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            letterSpacing: 0.2,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'مساء الخير 👋',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white.withValues(alpha: 0.85),
+                                ),
+                              ),
+                              Text(
+                                widget.userName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.cairo(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
