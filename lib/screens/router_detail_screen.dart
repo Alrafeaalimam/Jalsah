@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../models/router_model.dart';
 import '../services/api_client.dart';
+import '../services/mikrotik_discovery_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_empty_state.dart';
 import '../widgets/app_error_state.dart';
@@ -53,8 +54,89 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
     super.initState();
     _router = widget.router;
     _tabController = TabController(length: 2, vsync: this);
+    _initScreen();
+  }
+
+  Future<void> _initScreen() async {
+    if (MikrotikDiscoveryService.isLocalPrivateIp(_router.host)) {
+      await _verifyInitialConnectionOnOpen();
+    }
     _loadHotspotUsers();
     _loadActiveSessions();
+  }
+
+  /// Automatically probes and verifies local router connection when screen opens.
+  Future<void> _verifyInitialConnectionOnOpen() async {
+    final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+    if (creds == null ||
+        creds['username'] == null ||
+        creds['username']!.isEmpty ||
+        creds['password'] == null ||
+        creds['password']!.isEmpty) {
+      return;
+    }
+
+    try {
+      final testResult = await MikrotikDiscoveryService.testDirectConnection(
+        host: _router.host,
+        port: _router.apiPort,
+        username: creds['username']!,
+        password: creds['password']!,
+        connectionMethod: _router.connectionMethod,
+      );
+
+      if (!mounted) return;
+
+      if (testResult['success'] == true) {
+        final data = testResult['data'] as Map<String, dynamic>?;
+        final newVersion = (data?['version'] as String?)?.trim() ?? _router.routerOsVersion;
+        final newBoard = (data?['boardName'] as String?)?.trim() ?? _router.boardModel;
+        final cpu = (data?['cpuLoad'] as num?)?.toInt() ?? _router.cpuLoadPercentage;
+        final uptime = (data?['uptimeSeconds'] as num?)?.toInt() ?? _router.uptimeSeconds;
+        final identity = (data?['identity'] as String?)?.trim();
+        final resolvedName = (identity != null && identity.isNotEmpty) ? identity : _router.name;
+
+        setState(() {
+          _router = _router.copyWith(
+            name: resolvedName,
+            status: 'ONLINE',
+            boardModel: newBoard,
+            routerOsVersion: newVersion,
+            cpuLoadPercentage: cpu,
+            uptimeSeconds: uptime,
+            lastSeenAt: DateTime.now(),
+            lastErrorMessage: null,
+          );
+        });
+
+        // Sync verified online status to backend
+        try {
+          await ApiClient.updateRouter(
+            id: _router.id,
+            name: resolvedName,
+            host: _router.host,
+            port: _router.apiPort,
+            status: 'ONLINE',
+            routerOsVersion: newVersion,
+            boardModel: newBoard,
+            cpuLoadPercentage: cpu,
+            uptimeSeconds: uptime,
+          );
+        } catch (_) {}
+      } else {
+        final isAuthError = testResult['errorCode'] == 'INVALID_CREDENTIALS';
+        final err = testResult['errorMessage'] ??
+            (isAuthError
+                ? 'فشلت المصادقة: اسم المستخدم أو كلمة المرور غير صحيحة'
+                : 'تعذر الاتصال بالراوتر على الشبكة المحلية (${_router.host}:${_router.apiPort})');
+        setState(() {
+          _router = _router.copyWith(
+            status: isAuthError ? 'ERROR' : 'OFFLINE',
+            lastErrorMessage: err,
+          );
+        });
+      }
+    } catch (_) {}
   }
 
   @override
@@ -72,6 +154,207 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
       _testErrorMessage = null;
     });
 
+    final isLocal = MikrotikDiscoveryService.isLocalPrivateIp(_router.host);
+
+    if (isLocal) {
+      // Requirement 1 & 3: Direct on-device authentication & diagnostics for private LAN addresses
+      try {
+        final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+
+        if (creds == null ||
+            creds['username'] == null ||
+            creds['username']!.isEmpty ||
+            creds['password'] == null ||
+            creds['password']!.isEmpty) {
+          if (!mounted) return;
+          const msg =
+              'تعذر التحقق من الاتصال: بيانات اعتماد الراوتر (اسم المستخدم أو كلمة المرور) غير متوفرة محلياً على هذا الجهاز لإجراء المصادقة المباشرة. يرجى تعديل الراوتر وتأكيد كلمة المرور.';
+          setState(() {
+            _isTestingConnection = false;
+            _testErrorMessage = msg;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFFD97706),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              content: Text(
+                msg,
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          );
+          return;
+        }
+
+        final testResult = await MikrotikDiscoveryService.testDirectConnection(
+          host: _router.host,
+          port: _router.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          connectionMethod: _router.connectionMethod,
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+          _isTestingConnection = false;
+        });
+
+        if (testResult['success'] == true) {
+          final data = testResult['data'] as Map<String, dynamic>?;
+          final newVersion = (data?['version'] as String?)?.trim() ?? _router.routerOsVersion;
+          final newBoard = (data?['boardName'] as String?)?.trim() ?? _router.boardModel;
+          final cpu = (data?['cpuLoad'] as num?)?.toInt() ?? _router.cpuLoadPercentage;
+          final uptime = (data?['uptimeSeconds'] as num?)?.toInt() ?? _router.uptimeSeconds;
+          final identity = (data?['identity'] as String?)?.trim();
+          final resolvedName = (identity != null && identity.isNotEmpty) ? identity : _router.name;
+
+          // Sync verified online status to backend and check update result explicitly
+          final updateResult = await ApiClient.updateRouter(
+            id: _router.id,
+            name: resolvedName,
+            host: _router.host,
+            port: _router.apiPort,
+            status: 'ONLINE',
+            routerOsVersion: newVersion,
+            boardModel: newBoard,
+            cpuLoadPercentage: cpu,
+            uptimeSeconds: uptime,
+          );
+
+          if (!mounted) return;
+
+          if (updateResult['success'] == true) {
+            setState(() {
+              _router = RouterModel(
+                id: _router.id,
+                name: resolvedName,
+                host: _router.host,
+                apiPort: _router.apiPort,
+                connectionMethod: _router.connectionMethod,
+                status: 'ONLINE',
+                boardModel: newBoard,
+                routerOsVersion: newVersion,
+                cpuLoadPercentage: cpu,
+                uptimeSeconds: uptime,
+                lastSeenAt: DateTime.now(),
+                lastErrorMessage: null,
+              );
+              _testSuccessMessage = 'تم الاتصال بالراوتر بنجاح ومصادقة البيانات عبر الشبكة المحلية (منفذ ${_router.apiPort})';
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: AppColors.statusOnline,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'الاتصال بالراوتر والمصادقة ناجحة ومستقرة محلياً',
+                        style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          } else {
+            // updateRouter failed on server - do NOT display status saved successfully
+            final saveErr = updateResult['errorMessage'] ?? 'فشل حفظ حالة الراوتر على الخادم السحابي';
+            setState(() {
+              _testErrorMessage = 'نجح الاتصال بالراوتر محلياً، لكن فشل حفظ الحالة على السيرفر: $saveErr';
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: Colors.orange.shade800,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                content: Text(
+                  'نجح فحص الراوتر محلياً، لكن تعذر حفظ الحالة في السيرفر: $saveErr',
+                  style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+              ),
+            );
+          }
+        } else {
+          final isAuthError = testResult['errorCode'] == 'INVALID_CREDENTIALS';
+          final err = testResult['errorMessage'] ??
+              (isAuthError
+                  ? 'فشلت المصادقة: اسم المستخدم أو كلمة المرور غير صحيحة لنظام MikroTik'
+                  : 'تعذر الوصول إلى الراوتر على الشبكة المحلية (${_router.host}:${_router.apiPort}). يرجى التأكد من اتصال هاتفك بنفس الشبكة وتفعيل خدمة API.');
+          final newStatus = isAuthError ? 'ERROR' : 'OFFLINE';
+
+          setState(() {
+            _router = RouterModel(
+              id: _router.id,
+              name: _router.name,
+              host: _router.host,
+              apiPort: _router.apiPort,
+              connectionMethod: _router.connectionMethod,
+              status: newStatus,
+              boardModel: _router.boardModel,
+              routerOsVersion: _router.routerOsVersion,
+              cpuLoadPercentage: _router.cpuLoadPercentage,
+              uptimeSeconds: _router.uptimeSeconds,
+              lastSeenAt: _router.lastSeenAt,
+              lastErrorMessage: err,
+            );
+            _testErrorMessage = err;
+          });
+
+          // Sync offline or error status to backend
+          await ApiClient.updateRouter(
+            id: _router.id,
+            name: _router.name,
+            host: _router.host,
+            port: _router.apiPort,
+            status: newStatus,
+            lastErrorMessage: err,
+          );
+
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOffline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              content: Text(
+                err,
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (!mounted) return;
+        final err = 'خطأ أثناء فحص الراوتر على الشبكة المحلية: $e';
+        setState(() {
+          _isTestingConnection = false;
+          _testErrorMessage = err;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text(
+              err,
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Remote / Public IP testing via cloud server:
     final result = await ApiClient.testRouterConnectionForId(_router.id);
 
     if (!mounted) return;
@@ -161,6 +444,36 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
       _usersError = null;
     });
 
+    final isLocal = MikrotikDiscoveryService.isLocalPrivateIp(_router.host);
+
+    if (isLocal) {
+      final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+      if (creds != null &&
+          creds['username'] != null &&
+          creds['username']!.isNotEmpty &&
+          creds['password'] != null) {
+        final directResult = await MikrotikDiscoveryService.getHotspotUsersDirect(
+          host: _router.host,
+          port: _router.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          connectionMethod: _router.connectionMethod,
+        );
+
+        if (!mounted) return;
+
+        if (directResult['success'] == true) {
+          final rawList = directResult['data'] as List<dynamic>? ?? [];
+          setState(() {
+            _hotspotUsers = rawList.map((e) => e as Map<String, dynamic>).toList();
+            _isLoadingUsers = false;
+            _usersError = null;
+          });
+          return;
+        }
+      }
+    }
+
     final result = await ApiClient.getRouterHotspotUsers(_router.id);
 
     if (!mounted) return;
@@ -173,9 +486,14 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
         _usersError = null;
       });
     } else {
+      String err = result['errorMessage'] ?? 'تعذر جلب مستخدمي الهوتسبوت';
+      if (isLocal &&
+          (err.contains('SSRF') || err.contains('INVALID_ROUTER_TARGET') || err.contains('Private IP') || result['errorCode'] == 'ROUTER_UNREACHABLE')) {
+        err = 'ملاحظة: الراوتر يعمل على الشبكة المحلية (${_router.host}). يرجى التحقق من اتصال هاتفك بنفس الشبكة وصحة بيانات اعتماد الراوتر لجلب المستخدمين مباشرة.';
+      }
       setState(() {
         _isLoadingUsers = false;
-        _usersError = result['errorMessage'] ?? 'تعذر جلب مستخدمي الهوتسبوت';
+        _usersError = err;
       });
     }
   }
@@ -185,6 +503,36 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
       _isLoadingSessions = true;
       _sessionsError = null;
     });
+
+    final isLocal = MikrotikDiscoveryService.isLocalPrivateIp(_router.host);
+
+    if (isLocal) {
+      final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+      if (creds != null &&
+          creds['username'] != null &&
+          creds['username']!.isNotEmpty &&
+          creds['password'] != null) {
+        final directResult = await MikrotikDiscoveryService.getHotspotActiveSessionsDirect(
+          host: _router.host,
+          port: _router.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          connectionMethod: _router.connectionMethod,
+        );
+
+        if (!mounted) return;
+
+        if (directResult['success'] == true) {
+          final rawList = directResult['data'] as List<dynamic>? ?? [];
+          setState(() {
+            _activeSessions = rawList.map((e) => e as Map<String, dynamic>).toList();
+            _isLoadingSessions = false;
+            _sessionsError = null;
+          });
+          return;
+        }
+      }
+    }
 
     final result = await ApiClient.getRouterHotspotSessions(_router.id);
 
@@ -198,9 +546,14 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
         _sessionsError = null;
       });
     } else {
+      String err = result['errorMessage'] ?? 'تعذر جلب الجلسات النشطة';
+      if (isLocal &&
+          (err.contains('SSRF') || err.contains('INVALID_ROUTER_TARGET') || err.contains('Private IP') || result['errorCode'] == 'ROUTER_UNREACHABLE')) {
+        err = 'ملاحظة: الراوتر يعمل على الشبكة المحلية (${_router.host}). يرجى التحقق من اتصال الهاتف بنفس الشبكة لعرض الجلسات النشطة مباشرة.';
+      }
       setState(() {
         _isLoadingSessions = false;
-        _sessionsError = result['errorMessage'] ?? 'تعذر جلب الجلسات النشطة';
+        _sessionsError = err;
       });
     }
   }
@@ -220,6 +573,44 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
         ),
       ),
     );
+
+    final isLocal = MikrotikDiscoveryService.isLocalPrivateIp(_router.host);
+
+    if (isLocal) {
+      final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+      if (creds != null &&
+          creds['username'] != null &&
+          creds['username']!.isNotEmpty &&
+          creds['password'] != null) {
+        final directResult = await MikrotikDiscoveryService.toggleHotspotUserDirect(
+          host: _router.host,
+          port: _router.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          targetUsername: username,
+          isEnabled: newEnabled,
+          connectionMethod: _router.connectionMethod,
+        );
+
+        if (!mounted) return;
+
+        if (directResult['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOnline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              content: Text(
+                newEnabled ? 'تم تفعيل المستخدم $username بنجاح على الراوتر' : 'تم تعطيل المستخدم $username بنجاح على الراوتر',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          );
+          _loadHotspotUsers();
+          return;
+        }
+      }
+    }
 
     final result = await ApiClient.toggleHotspotUser(
       routerId: _router.id,
@@ -294,6 +685,43 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
     );
 
     if (confirm != true) return;
+
+    final isLocal = MikrotikDiscoveryService.isLocalPrivateIp(_router.host);
+
+    if (isLocal) {
+      final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
+      if (creds != null &&
+          creds['username'] != null &&
+          creds['username']!.isNotEmpty &&
+          creds['password'] != null) {
+        final directResult = await MikrotikDiscoveryService.disconnectHotspotSessionDirect(
+          host: _router.host,
+          port: _router.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          targetUsername: username,
+          connectionMethod: _router.connectionMethod,
+        );
+
+        if (!mounted) return;
+
+        if (directResult['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: AppColors.statusOnline,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              content: Text(
+                'تم فصل جلسة المستخدم $username بنجاح من الراوتر',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
+          );
+          _loadActiveSessions();
+          return;
+        }
+      }
+    }
 
     final result = await ApiClient.disconnectHotspotSession(
       routerId: _router.id,

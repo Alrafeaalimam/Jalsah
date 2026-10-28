@@ -12,6 +12,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/router_model.dart';
 import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
+import '../services/mikrotik_discovery_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/app_empty_state.dart';
 import '../widgets/app_error_state.dart';
@@ -176,17 +177,85 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     if (result['success'] == true) {
+      final list = (result['data'] as List<dynamic>).cast<RouterModel>();
       setState(() {
-        _routers = (result['data'] as List<dynamic>).cast<RouterModel>();
+        _routers = list;
         _isLoading = false;
         _errorMessage = null;
       });
+      _verifyLocalRoutersBackground(list);
     } else {
       setState(() {
         _isLoading = false;
         _errorMessage =
             result['errorMessage'] ?? 'تعذر الاتصال بالخادم لجلب قائمة الراوترات';
       });
+    }
+  }
+
+  /// Verifies connectivity for local routers in background to update live online status
+  Future<void> _verifyLocalRoutersBackground(List<RouterModel> routers) async {
+    for (final r in routers) {
+      if (!MikrotikDiscoveryService.isLocalPrivateIp(r.host)) continue;
+      try {
+        final creds = await MikrotikDiscoveryService.getRouterCredentials(r.id);
+        if (creds == null ||
+            creds['username'] == null ||
+            creds['username']!.isEmpty ||
+            creds['password'] == null ||
+            creds['password']!.isEmpty) {
+          continue;
+        }
+
+        final res = await MikrotikDiscoveryService.testDirectConnection(
+          host: r.host,
+          port: r.apiPort,
+          username: creds['username']!,
+          password: creds['password']!,
+          connectionMethod: r.connectionMethod,
+          timeout: const Duration(seconds: 4),
+        );
+
+        if (!mounted) return;
+
+        if (res['success'] == true) {
+          final data = res['data'] as Map<String, dynamic>?;
+          final newVer = (data?['version'] as String?)?.trim() ?? r.routerOsVersion;
+          final newBoard = (data?['boardName'] as String?)?.trim() ?? r.boardModel;
+          final cpu = (data?['cpuLoad'] as num?)?.toInt() ?? r.cpuLoadPercentage;
+          final uptime = (data?['uptimeSeconds'] as num?)?.toInt() ?? r.uptimeSeconds;
+
+          setState(() {
+            _routers = _routers.map((item) {
+              if (item.id == r.id) {
+                return item.copyWith(
+                  status: 'ONLINE',
+                  boardModel: newBoard,
+                  routerOsVersion: newVer,
+                  cpuLoadPercentage: cpu,
+                  uptimeSeconds: uptime,
+                  lastSeenAt: DateTime.now(),
+                  lastErrorMessage: null,
+                );
+              }
+              return item;
+            }).toList();
+          });
+
+          // Sync verified online status to backend
+          ApiClient.updateRouter(
+            id: r.id,
+            name: r.name,
+            host: r.host,
+            port: r.apiPort,
+            status: 'ONLINE',
+            routerOsVersion: newVer,
+            boardModel: newBoard,
+            cpuLoadPercentage: cpu,
+            uptimeSeconds: uptime,
+          ).catchError((_) => <String, dynamic>{});
+        }
+      } catch (_) {}
     }
   }
 

@@ -19,10 +19,12 @@ import '../models/router_model.dart';
 import '../models/sale_model.dart';
 import '../models/staff_user_model.dart';
 import '../models/subscription_status_model.dart';
+import '../models/subscription_plan_model.dart';
 import '../models/admin_tenant_model.dart';
 import '../models/license_code_model.dart';
 import '../models/platform_settings_model.dart';
 import '../models/notification_model.dart';
+import 'mikrotik_discovery_service.dart';
 
 class ApiClient {
   static const String baseUrl = String.fromEnvironment(
@@ -42,18 +44,37 @@ class ApiClient {
   /// Whether an authorization token is currently held.
   static bool get isAuthenticated => _authToken != null && _authToken!.isNotEmpty;
 
-  /// Extracts the user's role from the stored auth token without any network request.
-  static String? getUserRole() {
+  /// Decodes and returns the JWT payload map if an auth token is active.
+  static Map<String, dynamic>? getJwtPayload() {
     if (_authToken == null || _authToken!.isEmpty) return null;
     try {
       final parts = _authToken!.split('.');
       if (parts.length != 3) return null;
       final normalized = base64Url.normalize(parts[1]);
       final payload = jsonDecode(utf8.decode(base64Url.decode(normalized)));
-      return payload['role'] as String?;
+      if (payload is Map<String, dynamic>) return payload;
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Returns the current tenant ID extracted from the auth token JWT payload.
+  static String? getTenantId() {
+    final payload = getJwtPayload();
+    return payload?['tenantId'] as String?;
+  }
+
+  /// Returns the current user ID extracted from the auth token JWT payload.
+  static String? getUserId() {
+    final payload = getJwtPayload();
+    return (payload?['userId'] ?? payload?['id'] ?? payload?['sub']) as String?;
+  }
+
+  /// Extracts the user's role from the stored auth token without any network request.
+  static String? getUserRole() {
+    final payload = getJwtPayload();
+    return payload?['role'] as String?;
   }
 
   /// Whether the authenticated user has an administrator role (TENANT_ADMIN or SUPER_ADMIN).
@@ -154,6 +175,9 @@ class ApiClient {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(tokenStorageKey);
+    } catch (_) {}
+    try {
+      MikrotikDiscoveryService.clearMemoryCreds();
     } catch (_) {}
   }
 
@@ -434,7 +458,7 @@ class ApiClient {
     }
   }
 
-  /// Tests connectivity to a MikroTik router through the backend API.
+  /// Tests connectivity to a MikroTik router through direct local probe (if on LAN) or backend API.
   static Future<Map<String, dynamic>> testRouterConnection({
     required String host,
     required int port,
@@ -442,7 +466,20 @@ class ApiClient {
     required String password,
     String? connectionMethod,
     String? certificateFingerprint,
+    bool forceRemote = false,
   }) async {
+    // If testing a local private router IP, ALWAYS probe directly from device!
+    // A cloud server cannot access private LAN IPs (RFC1918) and SSRF guards rightfully block them.
+    if (!forceRemote && MikrotikDiscoveryService.isLocalPrivateIp(host)) {
+      return await MikrotikDiscoveryService.testDirectConnection(
+        host: host,
+        port: port,
+        username: username,
+        password: password,
+        connectionMethod: connectionMethod,
+      );
+    }
+
     final uri = Uri.parse('$baseUrl/api/v1/routers/test-connection');
     final Map<String, dynamic> data = {
       'host': host,
@@ -617,6 +654,11 @@ class ApiClient {
     required String password,
     String? connectionMethod,
     String? certificateFingerprint,
+    String? status,
+    String? routerOsVersion,
+    String? boardModel,
+    int? cpuLoadPercentage,
+    int? uptimeSeconds,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/routers');
     final Map<String, dynamic> data = {
@@ -631,6 +673,21 @@ class ApiClient {
     }
     if (certificateFingerprint != null && certificateFingerprint.isNotEmpty) {
       data['certificateFingerprint'] = certificateFingerprint;
+    }
+    if (status != null && status.isNotEmpty) {
+      data['status'] = status;
+    }
+    if (routerOsVersion != null && routerOsVersion.isNotEmpty) {
+      data['routerOsVersion'] = routerOsVersion;
+    }
+    if (boardModel != null && boardModel.isNotEmpty) {
+      data['boardModel'] = boardModel;
+    }
+    if (cpuLoadPercentage != null) {
+      data['cpuLoadPercentage'] = cpuLoadPercentage;
+    }
+    if (uptimeSeconds != null) {
+      data['uptimeSeconds'] = uptimeSeconds;
     }
     final payload = jsonEncode(data);
 
@@ -726,6 +783,9 @@ class ApiClient {
       ) as Map<String, dynamic>;
 
       if (response.statusCode == 200 && body['success'] == true) {
+        try {
+          await MikrotikDiscoveryService.deleteRouterCredentials(routerId: id);
+        } catch (_) {}
         return {
           'success': true,
           'message': body['message'] ?? 'تم حذف الراوتر بنجاح',
@@ -804,6 +864,12 @@ class ApiClient {
     String? password,
     String? connectionMethod,
     String? certificateFingerprint,
+    String? status,
+    String? routerOsVersion,
+    String? boardModel,
+    int? cpuLoadPercentage,
+    int? uptimeSeconds,
+    String? lastErrorMessage,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/routers/$id');
     final Map<String, dynamic> data = {};
@@ -817,6 +883,24 @@ class ApiClient {
     }
     if (certificateFingerprint != null && certificateFingerprint.isNotEmpty) {
       data['certificateFingerprint'] = certificateFingerprint;
+    }
+    if (status != null && status.isNotEmpty) {
+      data['status'] = status;
+    }
+    if (routerOsVersion != null && routerOsVersion.isNotEmpty) {
+      data['routerOsVersion'] = routerOsVersion;
+    }
+    if (boardModel != null && boardModel.isNotEmpty) {
+      data['boardModel'] = boardModel;
+    }
+    if (cpuLoadPercentage != null) {
+      data['cpuLoadPercentage'] = cpuLoadPercentage;
+    }
+    if (uptimeSeconds != null) {
+      data['uptimeSeconds'] = uptimeSeconds;
+    }
+    if (lastErrorMessage != null) {
+      data['lastErrorMessage'] = lastErrorMessage;
     }
 
     try {
@@ -3422,6 +3506,50 @@ class ApiClient {
     }
   }
 
+  /// Built-in fallback commercial subscription plans matching platform default seed
+  static List<SubscriptionPlanModel> get defaultCommercialPlans => const [
+        SubscriptionPlanModel(
+          id: 'plan-1-month',
+          name: 'باقة شهر واحد',
+          durationDays: 30,
+          price: 15000,
+          currency: 'SDG',
+          description: 'اشتراك كامل لمدة شهر واحد مع إمكانية ربط حتى 5 راوترات',
+          maxRoutersLimit: 5,
+          isActive: true,
+        ),
+        SubscriptionPlanModel(
+          id: 'plan-3-months',
+          name: 'باقة 3 أشهر',
+          durationDays: 90,
+          price: 40000,
+          currency: 'SDG',
+          description: 'اشتراك مميز لمدة 3 أشهر مع إمكانية ربط حتى 10 راوترات',
+          maxRoutersLimit: 10,
+          isActive: true,
+        ),
+        SubscriptionPlanModel(
+          id: 'plan-6-months',
+          name: 'باقة 6 أشهر',
+          durationDays: 180,
+          price: 75000,
+          currency: 'SDG',
+          description: 'اشتراك نصف سنوي احترافي مع إمكانية ربط حتى 15 راوتراً',
+          maxRoutersLimit: 15,
+          isActive: true,
+        ),
+        SubscriptionPlanModel(
+          id: 'plan-1-year',
+          name: 'باقة سنة واحدة',
+          durationDays: 365,
+          price: 140000,
+          currency: 'SDG',
+          description: 'اشتراك سنوي شامل مع إمكانية ربط حتى 25 راوتراً ودعم فني مخصص',
+          maxRoutersLimit: 25,
+          isActive: true,
+        ),
+      ];
+
   /// Fetches active subscription plans for user to choose and subscribe.
   static Future<Map<String, dynamic>> getSubscriptionPlans() async {
     final uri = Uri.parse('$baseUrl/api/v1/subscription/plans');
@@ -3430,14 +3558,28 @@ class ApiClient {
           .get(uri, headers: _buildHeaders())
           .timeout(timeoutDuration);
 
+      if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ENDPOINT_NOT_DEPLOYED',
+          'isEndpointMissing': true,
+          'errorMessage':
+              'مسار باقات الاشتراك غير متاح على السيرفر المنشور حالياً (404 Not Found). يتطلب تشغيل/نشر تحديث Backend لتفعيل الباقات من قاعدة البيانات.',
+        };
+      }
+
       final Map<String, dynamic> body = jsonDecode(
         utf8.decode(response.bodyBytes),
       ) as Map<String, dynamic>;
 
       if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final plans = list
+            .map((e) => SubscriptionPlanModel.fromJson(e as Map<String, dynamic>))
+            .toList();
         return {
           'success': true,
-          'data': body['data'],
+          'data': plans,
         };
       }
 
@@ -3450,25 +3592,79 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_ERROR',
-        'errorMessage': 'تعذر الاتصال بالخادم لجلب باقات الاشتراك',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب باقات الاشتراك: $e',
       };
     }
   }
 
-  /// Submits an activation request for a selected commercial plan.
+  /// Fetches active manual payment methods for subscribers.
+  static Future<Map<String, dynamic>> getManualPaymentMethods() async {
+    final uri = Uri.parse('$baseUrl/api/v1/subscription/payment-methods');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ENDPOINT_NOT_DEPLOYED',
+          'isEndpointMissing': true,
+          'errorMessage': 'مسار وسائل الدفع غير متوفر على السيرفر المنشور حالياً (404)',
+        };
+      }
+
+      final Map<String, dynamic> body = jsonDecode(
+        utf8.decode(response.bodyBytes),
+      ) as Map<String, dynamic>;
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final methods = list
+            .map((e) => ManualPaymentMethodModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return {
+          'success': true,
+          'data': methods,
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_PAYMENT_METHODS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب وسائل الدفع المتاحة',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب وسائل الدفع: $e',
+      };
+    }
+  }
+
+  /// Submits an activation request for a selected commercial plan with payment proof.
   static Future<Map<String, dynamic>> requestSubscriptionActivation({
     required String planId,
+    String? paymentMethodId,
+    String? senderName,
+    String? referenceNumber,
+    String? receiptImageBase64,
     String? notes,
   }) async {
     final uri = Uri.parse('$baseUrl/api/v1/subscription/request-activation');
-    final payload = jsonEncode({
+    final Map<String, dynamic> payload = {
       'planId': planId,
+      if (paymentMethodId != null && paymentMethodId.isNotEmpty) 'paymentMethodId': paymentMethodId,
+      if (senderName != null && senderName.trim().isNotEmpty) 'senderName': senderName.trim(),
+      if (referenceNumber != null && referenceNumber.trim().isNotEmpty) 'referenceNumber': referenceNumber.trim(),
+      if (receiptImageBase64 != null && receiptImageBase64.isNotEmpty) 'receiptImageBase64': receiptImageBase64,
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-    });
+    };
 
     try {
       final response = await client
-          .post(uri, headers: _buildHeaders(isJson: true), body: payload)
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
           .timeout(timeoutDuration);
 
       final Map<String, dynamic> body = jsonDecode(
@@ -3480,7 +3676,7 @@ class ApiClient {
         return {
           'success': true,
           'data': body['data'],
-          'message': body['message'] ?? 'تم إرسال طلب التفعيل بنجاح',
+          'message': body['message'] ?? 'تم إرسال طلب التفعيل بنجاح وسيتم مراجعته وتأكيده من قبل الإدارة',
         };
       }
 
@@ -3489,6 +3685,14 @@ class ApiClient {
           'success': false,
           'errorCode': 'PENDING_REQUEST_EXISTS',
           'errorMessage': body['errorMessage'] ?? 'يوجد طلب تفعيل قيد المراجعة بالفعل لهذا الحساب',
+        };
+      }
+
+      if (body['errorCode'] == 'DUPLICATE_REFERENCE_NUMBER') {
+        return {
+          'success': false,
+          'errorCode': 'DUPLICATE_REFERENCE_NUMBER',
+          'errorMessage': body['errorMessage'] ?? 'رقم العملية المرجعي مستخدم مسبقاً في عملية اشتراك معتمدة',
         };
       }
 
@@ -3501,7 +3705,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_ERROR',
-        'errorMessage': 'تعذر الاتصال بالخادم لإرسال طلب التفعيل',
+        'errorMessage': 'تعذر الاتصال بالخادم لإرسال طلب التفعيل: $e',
       };
     }
   }
@@ -3519,9 +3723,13 @@ class ApiClient {
       ) as Map<String, dynamic>;
 
       if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final requests = list
+            .map((e) => SubscriptionRequestModel.fromJson(e as Map<String, dynamic>))
+            .toList();
         return {
           'success': true,
-          'data': body['data'],
+          'data': requests,
         };
       }
 
@@ -3534,7 +3742,7 @@ class ApiClient {
       return {
         'success': false,
         'errorCode': 'NETWORK_ERROR',
-        'errorMessage': 'تعذر الاتصال بالخادم لجلب طلبات التفعيل',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب طلبات التفعيل: $e',
       };
     }
   }
@@ -3612,6 +3820,624 @@ class ApiClient {
         'success': false,
         'errorCode': 'NETWORK_ERROR',
         'errorMessage': 'تعذر الاتصال بالخادم لتحديث الملف الشخصي',
+      };
+    }
+  }
+
+  /// Uploads user profile photo as a base64 encoded image to the backend.
+  static Future<Map<String, dynamic>> uploadUserProfileAvatar({
+    required Uint8List imageBytes,
+    String mimeType = 'image/jpeg',
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/auth/profile/avatar');
+    final base64Payload = 'data:$mimeType;base64,${base64Encode(imageBytes)}';
+
+    try {
+      final response = await client
+          .post(
+            uri,
+            headers: _buildHeaders(isJson: true),
+            body: jsonEncode({'imageBase64': base64Payload}),
+          )
+          .timeout(timeoutDuration);
+
+      if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ENDPOINT_NOT_DEPLOYED',
+          'isEndpointMissing': true,
+          'errorMessage': 'مسار رفع الصورة الشخصية غير متاح على السيرفر المنشور حالياً (404 Not Found). يتطلب نشر تحديث Backend.',
+        };
+      }
+
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      } catch (_) {
+        decoded = null;
+      }
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'avatarUrl': body['data']?['avatarUrl'],
+          'message': body['message'] ?? 'تم تحديث الصورة الشخصية بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'AVATAR_UPLOAD_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل رفع وتحديث الصورة الشخصية',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'خطأ في الاتصال بالخادم أثناء رفع الصورة: $e',
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // SUPER ADMIN SUBSCRIPTION PLANS MANAGEMENT
+  // --------------------------------------------------------------------------
+
+  /// Fetches all subscription plans (active & inactive) for Super Admin dashboard.
+  static Future<Map<String, dynamic>> getAdminSubscriptionPlans() async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-plans');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ENDPOINT_NOT_DEPLOYED',
+          'isEndpointMissing': true,
+          'errorMessage':
+              'مسار إدارة باقات الاشتراك غير متاح على السيرفر المنشور حالياً (404 Not Found). يتطلب تشغيل/نشر تحديث Backend.',
+        };
+      }
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final plans = list.map((e) => SubscriptionPlanModel.fromJson(e as Map<String, dynamic>)).toList();
+        return {
+          'success': true,
+          'data': plans,
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_ADMIN_PLANS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب باقات الاشتراك للأدمن',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب باقات الأدمن: $e',
+      };
+    }
+  }
+
+  /// Creates a new subscription plan (Super Admin only).
+  static Future<Map<String, dynamic>> createAdminSubscriptionPlan({
+    required String name,
+    required int durationDays,
+    required double price,
+    String currency = 'SDG',
+    String? description,
+    int maxRoutersLimit = 5,
+    bool isActive = true,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-plans');
+    final Map<String, dynamic> payload = {
+      'name': name.trim(),
+      'durationDays': durationDays,
+      'price': price,
+      'currency': currency.trim(),
+      'maxRoutersLimit': maxRoutersLimit,
+      'isActive': isActive,
+    };
+    if (description != null && description.trim().isNotEmpty) {
+      payload['description'] = description.trim();
+    }
+
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if ((response.statusCode == 200 || response.statusCode == 201) && body['success'] == true) {
+        return {
+          'success': true,
+          'data': SubscriptionPlanModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم إنشاء باقة الاشتراك بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'CREATE_PLAN_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إنشاء باقة الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لإنشاء الباقة: $e',
+      };
+    }
+  }
+
+  /// Updates an existing subscription plan (Super Admin only).
+  static Future<Map<String, dynamic>> updateAdminSubscriptionPlan(
+    String id, {
+    String? name,
+    int? durationDays,
+    double? price,
+    String? currency,
+    String? description,
+    int? maxRoutersLimit,
+    bool? isActive,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-plans/$id');
+    final Map<String, dynamic> payload = {};
+    if (name != null) payload['name'] = name.trim();
+    if (durationDays != null) payload['durationDays'] = durationDays;
+    if (price != null) payload['price'] = price;
+    if (currency != null) payload['currency'] = currency.trim();
+    if (description != null) payload['description'] = description.trim();
+    if (maxRoutersLimit != null) payload['maxRoutersLimit'] = maxRoutersLimit;
+    if (isActive != null) payload['isActive'] = isActive;
+
+    try {
+      final response = await client
+          .put(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': SubscriptionPlanModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم تحديث باقة الاشتراك بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'UPDATE_PLAN_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تحديث باقة الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لتحديث الباقة: $e',
+      };
+    }
+  }
+
+  /// Toggles active status of a subscription plan (Super Admin only).
+  static Future<Map<String, dynamic>> toggleAdminSubscriptionPlanActive(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-plans/$id/toggle-active');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': SubscriptionPlanModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم تغيير حالة تفعيل الباقة بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'TOGGLE_PLAN_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تغيير حالة الباقة',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لتغيير حالة الباقة: $e',
+      };
+    }
+  }
+
+  /// Safely deletes or deactivates a subscription plan (Super Admin only).
+  static Future<Map<String, dynamic>> deleteAdminSubscriptionPlan(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-plans/$id');
+    try {
+      final response = await client
+          .delete(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'deleted': body['deleted'] == true,
+          'deactivated': body['deactivated'] == true,
+          'message': body['message'] ?? 'تمت العملية بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'DELETE_PLAN_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل حذف أو تعطيل باقة الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لحذف الباقة: $e',
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // SUPER ADMIN TENANT SUBSCRIPTION REQUESTS MANAGEMENT
+  // --------------------------------------------------------------------------
+
+  /// Fetches tenant activation and subscription requests for Super Admin.
+  static Future<Map<String, dynamic>> getAdminSubscriptionRequests({String? status}) async {
+    final query = (status != null && status.isNotEmpty) ? '?status=$status' : '';
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-requests$query');
+
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      if (response.statusCode == 404) {
+        // If endpoint is not found, return empty array gracefully
+        return {'success': true, 'data': []};
+      }
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'] is List ? body['data'] : [],
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_REQUESTS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب طلبات اشتراك المستأجرين',
+      };
+    } catch (e) {
+      return {
+        'success': true,
+        'data': [], // Return empty list rather than hard crash on network hiccup
+        'isFallback': true,
+      };
+    }
+  }
+
+  /// Approves a tenant subscription request and extends their subscription.
+  static Future<Map<String, dynamic>> approveAdminSubscriptionRequest(String requestId) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-requests/$requestId/approve');
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode({}))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['message'] ?? 'تمت الموافقة على طلب الاشتراك وتفعيل حساب المستأجر بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'APPROVE_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل قبول طلب الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لقبول طلب الاشتراك: $e',
+      };
+    }
+  }
+
+  /// Rejects a tenant subscription request with an optional reason.
+  static Future<Map<String, dynamic>> rejectAdminSubscriptionRequest(
+    String requestId, {
+    String? reason,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/subscription-requests/$requestId/reject');
+    final Map<String, dynamic> payload = {};
+    if (reason != null && reason.trim().isNotEmpty) {
+      payload['reason'] = reason.trim();
+    }
+
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': body['data'],
+          'message': body['message'] ?? 'تم رفض طلب الاشتراك بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'REJECT_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل رفض طلب الاشتراك',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لرفض طلب الاشتراك: $e',
+      };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // SUPER ADMIN MANUAL PAYMENT METHODS MANAGEMENT
+  // --------------------------------------------------------------------------
+
+  /// Returns request headers with the current auth token for media/images.
+  static Map<String, String> get authHeaders => _buildHeaders();
+
+  /// Fetches all manual payment methods for Super Admin.
+  static Future<Map<String, dynamic>> getAdminPaymentMethods() async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/payment-methods');
+    try {
+      final response = await client
+          .get(uri, headers: _buildHeaders())
+          .timeout(timeoutDuration);
+
+      if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'errorCode': 'ENDPOINT_NOT_DEPLOYED',
+          'isEndpointMissing': true,
+          'errorMessage': 'مسار إدارة وسائل الدفع غير متاح على السيرفر (404)',
+        };
+      }
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        final List<dynamic> list = body['data'] as List<dynamic>? ?? [];
+        final methods = list
+            .map((e) => ManualPaymentMethodModel.fromJson(e as Map<String, dynamic>))
+            .toList();
+        return {
+          'success': true,
+          'data': methods,
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'FETCH_PAYMENT_METHODS_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل جلب وسائل الدفع للإدارة',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لجلب وسائل الدفع: $e',
+      };
+    }
+  }
+
+  /// Creates a new manual payment method (Super Admin).
+  static Future<Map<String, dynamic>> createAdminPaymentMethod({
+    required String providerName,
+    required String accountName,
+    required String accountNumber,
+    String? iban,
+    String? instructions,
+    String currency = 'SDG',
+    bool isActive = true,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/payment-methods');
+    final Map<String, dynamic> payload = {
+      'providerName': providerName.trim(),
+      'accountName': accountName.trim(),
+      'accountNumber': accountNumber.trim(),
+      'currency': currency.trim(),
+      'isActive': isActive,
+    };
+    if (iban != null && iban.trim().isNotEmpty) {
+      payload['iban'] = iban.trim();
+    }
+    if (instructions != null && instructions.trim().isNotEmpty) {
+      payload['instructions'] = instructions.trim();
+    }
+
+    try {
+      final response = await client
+          .post(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if ((response.statusCode == 200 || response.statusCode == 201) && body['success'] == true) {
+        return {
+          'success': true,
+          'data': ManualPaymentMethodModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تمت إضافة وسيلة الدفع بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'CREATE_METHOD_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل إضافة وسيلة الدفع',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لإضافة وسيلة الدفع: $e',
+      };
+    }
+  }
+
+  /// Updates an existing manual payment method (Super Admin).
+  static Future<Map<String, dynamic>> updateAdminPaymentMethod(
+    String id, {
+    String? providerName,
+    String? accountName,
+    String? accountNumber,
+    String? iban,
+    String? instructions,
+    String? currency,
+    bool? isActive,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/payment-methods/$id');
+    final Map<String, dynamic> payload = {};
+    if (providerName != null) payload['providerName'] = providerName.trim();
+    if (accountName != null) payload['accountName'] = accountName.trim();
+    if (accountNumber != null) payload['accountNumber'] = accountNumber.trim();
+    if (iban != null) payload['iban'] = iban.trim();
+    if (instructions != null) payload['instructions'] = instructions.trim();
+    if (currency != null) payload['currency'] = currency.trim();
+    if (isActive != null) payload['isActive'] = isActive;
+
+    try {
+      final response = await client
+          .put(uri, headers: _buildHeaders(isJson: true), body: jsonEncode(payload))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': ManualPaymentMethodModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم تحديث وسيلة الدفع بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'UPDATE_METHOD_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تحديث وسيلة الدفع',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لتحديث وسيلة الدفع: $e',
+      };
+    }
+  }
+
+  /// Toggles active status of a manual payment method (Super Admin).
+  static Future<Map<String, dynamic>> toggleAdminPaymentMethodActive(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/payment-methods/$id/toggle-active');
+    try {
+      final response = await client
+          .patch(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'data': ManualPaymentMethodModel.fromJson(body['data'] as Map<String, dynamic>),
+          'message': body['message'] ?? 'تم تغيير حالة التفعيل بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'TOGGLE_METHOD_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل تغيير حالة وسيلة الدفع',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لتغيير حالة وسيلة الدفع: $e',
+      };
+    }
+  }
+
+  /// Deletes or deactivates a manual payment method (Super Admin).
+  static Future<Map<String, dynamic>> deleteAdminPaymentMethod(String id) async {
+    final uri = Uri.parse('$baseUrl/api/v1/admin/payment-methods/$id');
+    try {
+      final response = await client
+          .delete(uri, headers: _buildHeaders(isJson: true))
+          .timeout(timeoutDuration);
+
+      final dynamic decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final Map<String, dynamic> body = decoded is Map<String, dynamic> ? decoded : {};
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return {
+          'success': true,
+          'deleted': body['deleted'] == true,
+          'deactivated': body['deactivated'] == true,
+          'message': body['message'] ?? 'تمت العملية بنجاح',
+        };
+      }
+
+      return {
+        'success': false,
+        'errorCode': body['errorCode'] ?? 'DELETE_METHOD_FAILED',
+        'errorMessage': body['errorMessage'] ?? 'فشل حذف أو تعطيل وسيلة الدفع',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'NETWORK_ERROR',
+        'errorMessage': 'تعذر الاتصال بالخادم لحذف وسيلة الدفع: $e',
       };
     }
   }

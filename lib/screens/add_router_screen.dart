@@ -9,7 +9,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../models/router_model.dart';
+import '../models/discovered_router_model.dart';
 import '../services/api_client.dart';
+import '../services/mikrotik_discovery_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/neumorphic_text_field.dart';
 import '../widgets/pressable_neumorphic_card.dart';
@@ -40,8 +42,21 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
 
   bool _isTesting = false;
   bool _isSaving = false;
+  bool _isDiscovering = false;
+  DiscoveredRouterModel? _discoveredRouter;
+  String? _discoveryMessage;
   String? _serverErrorMessage;
   String? _testSuccessMessage;
+
+  String? _verifiedVersion;
+  String? _verifiedBoardModel;
+  int? _verifiedCpuLoad;
+  int? _verifiedUptime;
+  String? _testedHost;
+  int? _testedPort;
+  String? _testedUsername;
+  String? _testedPassword;
+  String? _testedMethod;
 
   @override
   void initState() {
@@ -51,7 +66,11 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       _nameController.text = r.name;
       _hostController.text = r.host;
       _portController.text = r.apiPort.toString();
-      const validMethods = ['ROUTEROS_API_SSL', 'REST_API_HTTPS', 'ROUTEROS_API_PLAIN'];
+      _verifiedVersion = r.routerOsVersion;
+      _verifiedBoardModel = r.boardModel;
+      _verifiedCpuLoad = r.cpuLoadPercentage;
+      _verifiedUptime = r.uptimeSeconds;
+      const validMethods = ['ROUTEROS_API_SSL', 'REST_API_HTTPS', 'ROUTEROS_API_PLAIN', 'REST_API_PLAIN'];
       if (validMethods.contains(r.connectionMethod)) {
         _connectionMethod = r.connectionMethod;
       } else if (r.connectionMethod == 'ROUTEROS_API') {
@@ -59,6 +78,13 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       } else {
         _connectionMethod = 'ROUTEROS_API_SSL';
       }
+      MikrotikDiscoveryService.getRouterCredentials(r.id).then((creds) {
+        if (mounted && creds != null && creds['username'] != null && creds['username']!.isNotEmpty) {
+          if (_usernameController.text.trim().isEmpty) {
+            _usernameController.text = creds['username']!;
+          }
+        }
+      });
     }
   }
 
@@ -121,6 +147,108 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
     return isValid;
   }
 
+  Future<void> _discoverLocalRouter() async {
+    if (_isDiscovering || _isTesting || _isSaving) return;
+
+    setState(() {
+      _isDiscovering = true;
+      _discoveryMessage = null;
+      _serverErrorMessage = null;
+      _testSuccessMessage = null;
+    });
+
+    try {
+      final username = _usernameController.text.trim().isNotEmpty
+          ? _usernameController.text.trim()
+          : null;
+      final password = _passwordController.text.isNotEmpty
+          ? _passwordController.text
+          : null;
+
+      final discovered = await MikrotikDiscoveryService.discoverOnLocalNetwork(
+        username: username,
+        password: password,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _isDiscovering = false;
+        _discoveredRouter = discovered;
+      });
+
+      if (discovered != null && discovered.isMikrotik) {
+        _hostController.text = discovered.host;
+        if (_nameController.text.trim().isEmpty && discovered.identity != null && discovered.identity!.isNotEmpty) {
+          _nameController.text = discovered.identity!;
+        }
+        if (discovered.port == 80 || discovered.port == 8080) {
+          _portController.text = discovered.port.toString();
+          _connectionMethod = 'REST_API_PLAIN';
+        } else if (discovered.port == 443) {
+          _portController.text = '443';
+          _connectionMethod = 'REST_API_HTTPS';
+        } else if (discovered.port == 8729) {
+          _portController.text = '8729';
+          _connectionMethod = 'ROUTEROS_API_SSL';
+        } else {
+          _portController.text = discovered.port.toString();
+          _connectionMethod = 'ROUTEROS_API_PLAIN';
+        }
+
+        // If credentials were provided during discovery AND management was reached with credentials:
+        if (username != null && password != null && discovered.managementReachable && !discovered.authRequired) {
+          _verifiedVersion = discovered.version;
+          _verifiedBoardModel = discovered.boardName;
+          _testSuccessMessage = 'تم التحقق من الاتصال وبيانات الاعتماد أثناء الاكتشاف';
+          _testedHost = discovered.host;
+          _testedPort = int.tryParse(_portController.text.trim());
+          _testedUsername = username;
+          _testedPassword = password;
+          _testedMethod = _connectionMethod;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOnline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'تم اكتشاف راوتر MikroTik بنجاح: ${discovered.host}',
+                    style: GoogleFonts.cairo(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          _discoveryMessage =
+              'لم يتم اكتشاف راوتر MikroTik متاح على الشبكة المحلية.\n\n'
+              'توضيح فني: الاتصال بالـ Wi-Fi وحده لا يضمن إمكانية قراءة بيانات الراوتر؛ يجب تفعيل إحدى خدمات الإدارة التالية في RouterOS (/ip service):\n'
+              '• خدمة www (المنفذ 80 أو 8080) لدعم REST API\n'
+              '• خدمة api (المنفذ 8728) أو api-ssl (المنفذ 8729)\n'
+              'مع التأكد من السماح لعنوان جهازك بالوصول دون جدار ناري مانع.';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isDiscovering = false;
+        _discoveryMessage = 'خطأ أثناء البحث عن الراوتر: $e';
+      });
+    }
+  }
+
   Future<void> _testConnection() async {
     if (_isTesting || _isSaving) return;
 
@@ -128,7 +256,14 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
     final portStr = _portController.text.trim();
     final portVal = int.tryParse(portStr);
     final username = _usernameController.text.trim();
-    final password = _passwordController.text;
+    String passwordToUse = _passwordController.text;
+
+    if (widget.routerToEdit != null && passwordToUse.isEmpty) {
+      final creds = await MikrotikDiscoveryService.getRouterCredentials(widget.routerToEdit!.id);
+      if (creds != null && creds['password'] != null && creds['password']!.isNotEmpty) {
+        passwordToUse = creds['password']!;
+      }
+    }
 
     // Check credentials required for test
     setState(() {
@@ -137,7 +272,7 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
           ? 'منفذ غير صالح (1-65535)'
           : null;
       _usernameError = username.isEmpty ? 'يرجى إدخال اسم المستخدم' : null;
-      _passwordError = password.isEmpty ? 'يرجى إدخال كلمة المرور' : null;
+      _passwordError = passwordToUse.isEmpty ? 'يرجى إدخال كلمة المرور' : null;
       _serverErrorMessage = null;
       _testSuccessMessage = null;
     });
@@ -147,7 +282,7 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
         portVal < 1 ||
         portVal > 65535 ||
         username.isEmpty ||
-        password.isEmpty) {
+        passwordToUse.isEmpty) {
       return;
     }
 
@@ -159,7 +294,7 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       host: host,
       port: portVal,
       username: username,
-      password: password,
+      password: passwordToUse,
       connectionMethod: _connectionMethod,
       certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
           ? _fingerprintController.text.trim()
@@ -174,15 +309,27 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
 
     if (result['success'] == true) {
       final data = result['data'] as Map<String, dynamic>?;
-      final identity = data?['identity'] ?? 'راوتر';
-      final version = data?['version'] ?? '';
-      final board = data?['boardName'] ?? '';
+      final identity = (data?['identity'] as String?)?.trim() ?? 'راوتر MikroTik';
+      final version = (data?['version'] as String?)?.trim() ?? '';
+      final board = (data?['boardName'] as String?)?.trim() ?? '';
+      _verifiedVersion = version.isNotEmpty ? version : null;
+      _verifiedBoardModel = board.isNotEmpty ? board : null;
+      _verifiedCpuLoad = (data?['cpuLoad'] as num?)?.toInt();
+      _verifiedUptime = (data?['uptimeSeconds'] as num?)?.toInt();
       final details = [identity, board, version]
-          .where((e) => (e as String).isNotEmpty)
+          .where((e) => e.isNotEmpty)
           .join(' - ');
 
       setState(() {
         _testSuccessMessage = 'تم الاتصال بنجاح بنظام MikroTik ($details)';
+        _testedHost = host;
+        _testedPort = portVal;
+        _testedUsername = username;
+        _testedPassword = passwordToUse;
+        _testedMethod = _connectionMethod;
+        if (_nameController.text.trim().isEmpty && identity.isNotEmpty && identity != 'راوتر MikroTik') {
+          _nameController.text = identity;
+        }
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -250,6 +397,102 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       _serverErrorMessage = null;
     });
 
+    final host = _hostController.text.trim();
+    final portVal = int.parse(_portController.text.trim());
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
+
+    final isEditing = widget.routerToEdit != null;
+    final bool isTestedAndMatching = _testSuccessMessage != null &&
+        _testedHost == host &&
+        _testedPort == portVal &&
+        _testedUsername == username &&
+        (_testedPassword == password || (isEditing && password.isEmpty)) &&
+        _testedMethod == _connectionMethod;
+
+    bool isOnline = isTestedAndMatching;
+
+    // Requirement:
+    // When editing:
+    //   - If password is empty: user is retaining current password. DO NOT test connection with empty password!
+    //   - If password is not empty: user entered a new password, so verify it!
+    // When adding:
+    //   - Verify connection with credentials before saving.
+    final shouldTestBeforeSave = !isOnline && username.isNotEmpty &&
+        (isEditing ? password.isNotEmpty : password.isNotEmpty);
+
+    if (shouldTestBeforeSave) {
+      try {
+        final testResult = await ApiClient.testRouterConnection(
+          host: host,
+          port: portVal,
+          username: username,
+          password: password,
+          connectionMethod: _connectionMethod,
+          certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
+              ? _fingerprintController.text.trim()
+              : null,
+        );
+
+        if (testResult['success'] == true) {
+          isOnline = true;
+          final data = testResult['data'] as Map<String, dynamic>?;
+          final version = (data?['version'] as String?)?.trim();
+          final board = (data?['boardName'] as String?)?.trim();
+          if (version != null && version.isNotEmpty) _verifiedVersion = version;
+          if (board != null && board.isNotEmpty) _verifiedBoardModel = board;
+          _verifiedCpuLoad = (data?['cpuLoad'] as num?)?.toInt() ?? _verifiedCpuLoad;
+          _verifiedUptime = (data?['uptimeSeconds'] as num?)?.toInt() ?? _verifiedUptime;
+          _testSuccessMessage = 'تم التحقق من الاتصال بنجاح';
+          _testedHost = host;
+          _testedPort = portVal;
+          _testedUsername = username;
+          _testedPassword = password;
+          _testedMethod = _connectionMethod;
+        } else {
+          // If credentials failed explicitly (invalid user or password):
+          if (testResult['errorCode'] == 'INVALID_CREDENTIALS') {
+            if (!mounted) return;
+            setState(() {
+              _isSaving = false;
+              _passwordError = isEditing
+                  ? 'كلمة المرور الجديدة غير صحيحة لنظام MikroTik'
+                  : (testResult['errorMessage'] ?? 'بيانات الاعتماد غير صحيحة (اسم المستخدم أو كلمة المرور)');
+              _serverErrorMessage = isEditing
+                  ? 'فشلت المصادقة: كلمة المرور الجديدة غير صالحة للراوتر'
+                  : 'فشل الاتصال: اسم المستخدم أو كلمة المرور غير صحيحة لنظام MikroTik';
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: AppColors.statusOffline,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                content: Row(
+                  children: [
+                    const Icon(Icons.lock_clock_rounded, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        isEditing
+                            ? 'فشلت المصادقة: كلمة المرور الجديدة غير صالحة للراوتر'
+                            : 'فشل المصادقة: اسم المستخدم أو كلمة المرور غير صحيحة للراوتر',
+                        style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+            return;
+          }
+          // If port is unreachable or connection timed out, save as OFFLINE with error recorded
+          isOnline = false;
+        }
+      } catch (_) {
+        isOnline = false;
+      }
+    }
+
     final result = widget.routerToEdit != null
         ? await ApiClient.updateRouter(
             id: widget.routerToEdit!.id,
@@ -266,6 +509,11 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
             certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
                 ? _fingerprintController.text.trim()
                 : null,
+            status: isOnline ? 'ONLINE' : null,
+            routerOsVersion: _verifiedVersion,
+            boardModel: _verifiedBoardModel,
+            cpuLoadPercentage: _verifiedCpuLoad,
+            uptimeSeconds: _verifiedUptime,
           )
         : await ApiClient.createRouter(
             name: _nameController.text.trim(),
@@ -277,6 +525,11 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
             certificateFingerprint: _fingerprintController.text.trim().isNotEmpty
                 ? _fingerprintController.text.trim()
                 : null,
+            status: isOnline ? 'ONLINE' : 'OFFLINE',
+            routerOsVersion: _verifiedVersion,
+            boardModel: _verifiedBoardModel,
+            cpuLoadPercentage: _verifiedCpuLoad,
+            uptimeSeconds: _verifiedUptime,
           );
 
     if (!mounted) return;
@@ -289,6 +542,51 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       final successMsg = widget.routerToEdit != null
           ? 'تم تحديث بيانات الراوتر بنجاح'
           : 'تم حفظ الراوتر وإضافته للنظام بنجاح';
+
+      // Securely cache credentials locally for on-device diagnostics without exposing secrets
+      final dynamic resData = result['data'];
+      final targetRouterId = widget.routerToEdit?.id ??
+          (resData is RouterModel
+              ? resData.id
+              : (resData is Map ? resData['id'] as String? : null));
+      if (targetRouterId != null) {
+        final existing = await MikrotikDiscoveryService.getRouterCredentials(targetRouterId);
+        final effectiveUser = username.isNotEmpty ? username : (existing?['username'] ?? '');
+
+        if (password.isNotEmpty && effectiveUser.isNotEmpty) {
+          await MikrotikDiscoveryService.saveRouterCredentials(
+            routerId: targetRouterId,
+            username: effectiveUser,
+            password: password,
+          );
+        } else if (effectiveUser.isNotEmpty && existing != null) {
+          await MikrotikDiscoveryService.saveRouterCredentials(
+            routerId: targetRouterId,
+            username: effectiveUser,
+            password: existing['password'] ?? '',
+          );
+        }
+
+        // If direct authentication succeeded on creation, explicitly sync status ONLINE and specs
+        if (isOnline && widget.routerToEdit == null) {
+          try {
+            await ApiClient.updateRouter(
+              id: targetRouterId,
+              name: _nameController.text.trim(),
+              host: host,
+              port: portVal,
+              status: 'ONLINE',
+              routerOsVersion: _verifiedVersion,
+              boardModel: _verifiedBoardModel,
+              cpuLoadPercentage: _verifiedCpuLoad,
+              uptimeSeconds: _verifiedUptime,
+            );
+          } catch (_) {}
+        }
+      }
+
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: AppColors.statusOnline,
@@ -313,7 +611,25 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
       // Return true to indicate a refresh is needed in Dashboard
       Navigator.of(context).pop(true);
     } else {
-      final err = result['errorMessage'] ?? 'حدث خطأ أثناء حفظ الراوتر';
+      String err = result['errorMessage'] ?? 'حدث خطأ أثناء حفظ الراوتر';
+      if (result['details'] is Map) {
+        final detailsMap = result['details'] as Map;
+        final parts = <String>[];
+        detailsMap.forEach((k, v) {
+          if (v is List) {
+            parts.add('$k: ${v.join(", ")}');
+          } else if (v != null) {
+            parts.add('$k: $v');
+          }
+        });
+        if (parts.isNotEmpty) {
+          err = '$err (${parts.join(" | ")})';
+        }
+      }
+      if (err.toLowerCase().contains('invalid request payload')) {
+        err = 'بيانات إعدادات الراوتر غير صالحة. يرجى التأكد من رقم المنفذ واختيار بروتوكول اتصال متوافق (مثل RouterOS API المنفذ 8728).';
+      }
+
       setState(() {
         _serverErrorMessage = err;
       });
@@ -367,15 +683,38 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
                       color: AppColors.textDark,
                     ),
                   ),
-                  Text(
-                    widget.routerToEdit != null ? 'تعديل الراوتر' : 'إضافة راوتر جديد',
-                    style: GoogleFonts.cairo(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textDark,
+                  Expanded(
+                    child: Center(
+                      child: Text(
+                        widget.routerToEdit != null ? 'تعديل الراوتر' : 'إضافة راوتر جديد',
+                        style: GoogleFonts.cairo(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 40),
+                  PressableNeumorphicCard(
+                    onTap: _isDiscovering ? null : _discoverLocalRouter,
+                    borderRadius: BorderRadius.circular(14),
+                    padding: const EdgeInsets.all(10),
+                    child: _isDiscovering
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.heroGradientStart,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.radar_rounded,
+                            size: 20,
+                            color: AppColors.heroGradientStart,
+                          ),
+                  ),
                 ],
               ),
             ),
@@ -385,6 +724,191 @@ class _AddRouterScreenState extends State<AddRouterScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
             children: [
+              // Local MikroTik Discovery Card
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.2),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.shadowDark.withValues(alpha: 0.06),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.wifi_find_rounded,
+                            color: AppColors.heroGradientStart,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'اكتشاف راوتر MikroTik في الشبكة المحلية',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                              Text(
+                                'فحص البوابة المحلية (Default Gateway) تلقائياً',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 11.5,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.heroGradientStart,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      onPressed: _isDiscovering ? null : _discoverLocalRouter,
+                      icon: _isDiscovering
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.radar_rounded, size: 18),
+                      label: Text(
+                        _isDiscovering
+                            ? 'جاري فحص الشبكة المحلية...'
+                            : 'بحث واكتشاف الراوتر تلقائياً',
+                        style: GoogleFonts.cairo(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (_discoveredRouter != null && _discoveredRouter!.isMikrotik) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.statusOnline.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppColors.statusOnline.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.verified_rounded,
+                                  color: AppColors.statusOnline,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'تم التحقق: راوتر MikroTik فعلي',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.statusOnline,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Divider(height: 14),
+                            Text(
+                              '• الاسم: ${_discoveredRouter!.identity ?? "راوتر MikroTik"}',
+                              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textDark),
+                            ),
+                            if (_discoveredRouter!.boardName != null)
+                              Text(
+                                '• الموديل: ${_discoveredRouter!.boardName}',
+                                style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textDark),
+                              ),
+                            if (_discoveredRouter!.version != null)
+                              Text(
+                                '• إصدار RouterOS: ${_discoveredRouter!.version}',
+                                style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textDark),
+                              ),
+                            Text(
+                              '• العنوان المكتشف: ${_discoveredRouter!.host}:${_discoveredRouter!.port}',
+                              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textDark),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (_discoveryMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.info_outline_rounded,
+                              color: Color(0xFFD97706),
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _discoveryMessage!,
+                                style: GoogleFonts.cairo(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF92400E),
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
               // Server / Test Info Banner
               if (_serverErrorMessage != null)
                 Container(

@@ -35,6 +35,36 @@ class RouterModel {
 
   bool get isOnline => status.toUpperCase() == 'ONLINE';
 
+  RouterModel copyWith({
+    String? id,
+    String? name,
+    String? host,
+    int? apiPort,
+    String? connectionMethod,
+    String? status,
+    String? boardModel,
+    String? routerOsVersion,
+    int? cpuLoadPercentage,
+    int? uptimeSeconds,
+    String? lastErrorMessage,
+    DateTime? lastSeenAt,
+  }) {
+    return RouterModel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      host: host ?? this.host,
+      apiPort: apiPort ?? this.apiPort,
+      connectionMethod: connectionMethod ?? this.connectionMethod,
+      status: status ?? this.status,
+      boardModel: boardModel ?? this.boardModel,
+      routerOsVersion: routerOsVersion ?? this.routerOsVersion,
+      cpuLoadPercentage: cpuLoadPercentage ?? this.cpuLoadPercentage,
+      uptimeSeconds: uptimeSeconds ?? this.uptimeSeconds,
+      lastErrorMessage: lastErrorMessage ?? this.lastErrorMessage,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+    );
+  }
+
   factory RouterModel.fromJson(Map<String, dynamic> json) {
     DateTime? parseDate(dynamic value) {
       if (value == null) return null;
