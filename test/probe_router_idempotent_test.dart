@@ -10,6 +10,7 @@
 //              5. Friendly Arabic error formatting without raw "Exception: failure:".
 // ============================================================================
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +27,10 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
   final List<Map<String, String>> routerUsers = [];
   final List<String> createdUserLog = [];
   final List<String> removedUserLog = [];
+
+  int connectAttempts = 0;
+  bool throwTimeoutOnConnectOnce = false;
+  bool throwTimeoutAlways = false;
 
   bool throwAlreadyHaveUserOnce = false;
   int createAttempts = 0;
@@ -50,7 +55,15 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
   });
 
   @override
-  Future<void> connect() async {}
+  Future<void> connect() async {
+    connectAttempts++;
+    if (throwTimeoutAlways) {
+      throw TimeoutException('Connection timed out');
+    }
+    if (throwTimeoutOnConnectOnce && connectAttempts == 1) {
+      throw TimeoutException('Connection timed out');
+    }
+  }
 
   @override
   Future<bool> login(String username, String password) async => true;
@@ -300,4 +313,94 @@ void main() {
       expect(result['errorMessage'], isNot(contains('failure:')));
     });
   });
+
+  group('Requirement 1 & 2: Timeout Handling & Single Retry', () {
+    test('Timeout on first attempt retries once and succeeds', () async {
+      mockClient.throwTimeoutOnConnectOnce = true;
+
+      final result = await LocalCardSyncService.probeRouter(router: testRouter);
+
+      expect(result['success'], isTrue);
+      expect(mockClient.connectAttempts, equals(2)); // First timed out, second succeeded
+      expect(result['message'], contains('تم التحقق من جاهزية الراوتر'));
+    });
+
+    test('Timeout twice returns failure with required Arabic message', () async {
+      mockClient.throwTimeoutAlways = true;
+
+      final result = await LocalCardSyncService.probeRouter(router: testRouter);
+
+      expect(result['success'], isFalse);
+      expect(result['errorCode'], equals('TIMEOUT'));
+      expect(
+        result['errorMessage'],
+        equals('تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة'),
+      );
+      expect(mockClient.connectAttempts, equals(2)); // Only 1 retry attempted
+    });
+  });
+
+  group('Requirement 4: Strict Exact Name Equality (==) in removeHotspotUser', () {
+    test('RouterOsBinaryClient.removeHotspotUser strictly checks == and never deletes _jalsah_probe_test_2 or similar', () async {
+      final fakeRawClient = FakeRawCommandRouterOsClient();
+      fakeRawClient.recordsToReturn = [
+        {'.id': '*1', 'name': '_jalsah_probe_test_2'},
+        {'.id': '*2', 'name': '_jalsah_probe_test_prefix'},
+        {'.id': '*3', 'name': '_jalsah_probe_test'},
+      ];
+
+      final removed = await fakeRawClient.removeHotspotUser('_jalsah_probe_test');
+
+      expect(removed, isTrue);
+      // Verify that removal was ONLY invoked for '*3' (exact match), never for '*1' or '*2'
+      final removeCommands = fakeRawClient.executedCommands
+          .where((cmd) => cmd.contains('/ip/hotspot/user/remove'))
+          .toList();
+      expect(removeCommands.length, equals(1));
+      expect(removeCommands.first, contains('=.id=*3'));
+      expect(removeCommands.any((cmd) => cmd.contains('=.id=*1')), isFalse);
+      expect(removeCommands.any((cmd) => cmd.contains('=.id=*2')), isFalse);
+    });
+
+    test('probeRouter preserves users with similar names like _jalsah_probe_test_2', () async {
+      mockClient.routerUsers.add({
+        '.id': '*1',
+        'name': '_jalsah_probe_test_2',
+        'password': 'pass',
+        'profile': 'default',
+      });
+      mockClient.routerUsers.add({
+        '.id': '*2',
+        'name': '_jalsah_probe_test_similar',
+        'password': 'pass',
+        'profile': 'default',
+      });
+
+      final result = await LocalCardSyncService.probeRouter(router: testRouter);
+
+      expect(result['success'], isTrue);
+      // Both similar users must still exist untouched
+      expect(mockClient.routerUsers.any((u) => u['name'] == '_jalsah_probe_test_2'), isTrue);
+      expect(mockClient.routerUsers.any((u) => u['name'] == '_jalsah_probe_test_similar'), isTrue);
+      // The probe user itself must be cleaned up
+      expect(mockClient.routerUsers.any((u) => u['name'] == '_jalsah_probe_test'), isFalse);
+    });
+  });
+}
+
+class FakeRawCommandRouterOsClient extends RouterOsBinaryClient {
+  final List<List<String>> executedCommands = [];
+  List<Map<String, String>> recordsToReturn = [];
+
+  FakeRawCommandRouterOsClient()
+      : super(host: '192.168.88.1', port: 8728);
+
+  @override
+  Future<List<Map<String, String>>> executeCommand(List<String> commandWords) async {
+    executedCommands.add(List.from(commandWords));
+    if (commandWords[0] == '/ip/hotspot/user/print') {
+      return recordsToReturn;
+    }
+    return [];
+  }
 }

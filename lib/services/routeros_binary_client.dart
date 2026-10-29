@@ -470,11 +470,12 @@ class RouterOsBinaryClient {
   }
 
   /// Deletes/removes a HotSpot user directly from the router (/ip/hotspot/user/remove).
+  /// Enforces full exact name equality (==) to prevent accidental removal of users with similar names.
   Future<bool> removeHotspotUser(String username) async {
     final records = await executeCommand([
       '/ip/hotspot/user/print',
       '?name=$username',
-      '=.proplist=.id',
+      '=.proplist=.id,name',
     ]);
 
     if (records.isEmpty) {
@@ -483,6 +484,12 @@ class RouterOsBinaryClient {
 
     bool anyRemoved = false;
     for (final record in records) {
+      // Enforce strict full name equality to never touch similar/prefix/suffix names
+      final recordName = record['name'];
+      if (recordName != null && recordName != username) {
+        continue;
+      }
+
       final id = record['.id'];
       if (id != null && id.isNotEmpty) {
         try {
