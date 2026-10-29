@@ -362,6 +362,43 @@ void main() {
       expect(removeCommands.any((cmd) => cmd.contains('=.id=*2')), isFalse);
     });
 
+    test('RouterOsBinaryClient.removeHotspotUser ignores records without a name field and never deletes them', () async {
+      final fakeRawClient = FakeRawCommandRouterOsClient();
+      fakeRawClient.recordsToReturn = [
+        {'.id': '*record_without_name'}, // No 'name' field
+        {'.id': '*different_user', 'name': 'other_user'},
+        {'.id': '*target_user', 'name': '_jalsah_probe_test'},
+      ];
+
+      final removed = await fakeRawClient.removeHotspotUser('_jalsah_probe_test');
+
+      expect(removed, isTrue);
+      final removeCommands = fakeRawClient.executedCommands
+          .where((cmd) => cmd.contains('/ip/hotspot/user/remove'))
+          .toList();
+      // Must only remove *target_user where recordName == username
+      expect(removeCommands.length, equals(1));
+      expect(removeCommands.first, contains('=.id=*target_user'));
+      // Verifies that record without name field (*record_without_name) was never deleted
+      expect(removeCommands.any((cmd) => cmd.contains('=.id=*record_without_name')), isFalse);
+      expect(removeCommands.any((cmd) => cmd.contains('=.id=*different_user')), isFalse);
+    });
+
+    test('RouterOsBinaryClient.removeHotspotUser returns false and deletes nothing when record lacks name field and no user matches', () async {
+      final fakeRawClient = FakeRawCommandRouterOsClient();
+      fakeRawClient.recordsToReturn = [
+        {'.id': '*anonymous_record'}, // Record with no name attribute at all
+      ];
+
+      final removed = await fakeRawClient.removeHotspotUser('_jalsah_probe_test');
+
+      expect(removed, isFalse);
+      final removeCommands = fakeRawClient.executedCommands
+          .where((cmd) => cmd.contains('/ip/hotspot/user/remove'))
+          .toList();
+      expect(removeCommands, isEmpty);
+    });
+
     test('probeRouter preserves users with similar names like _jalsah_probe_test_2', () async {
       mockClient.routerUsers.add({
         '.id': '*1',

@@ -484,9 +484,9 @@ class RouterOsBinaryClient {
 
     bool anyRemoved = false;
     for (final record in records) {
-      // Enforce strict full name equality to never touch similar/prefix/suffix names
+      // Enforce strict full name equality; ignore any record whose name is null or not strictly equal to username
       final recordName = record['name'];
-      if (recordName != null && recordName != username) {
+      if (recordName == null || recordName != username) {
         continue;
       }
 
