@@ -15,6 +15,8 @@ import '../models/router_model.dart';
 import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../services/card_pdf_service.dart';
+import '../services/local_card_sync_service.dart';
+import '../services/mikrotik_discovery_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/bounce_button.dart';
 import '../widgets/card_voucher_widget.dart';
@@ -57,6 +59,11 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
 
   CardBatchModel? _generatedBatch;
   List<CardModel>? _generatedCards;
+  BatchSyncResult? _syncResult;
+  bool _isResyncing = false;
+  String? _syncStatusMessage;
+  int _syncProgressCurrent = 0;
+  int _syncProgressTotal = 0;
 
   @override
   void initState() {
@@ -243,15 +250,49 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       return;
     }
 
+    final isLocalRouter = _selectedRouter != null &&
+        MikrotikDiscoveryService.isLocalPrivateIp(_selectedRouter!.host);
+
     setState(() {
       _isGenerating = true;
       _generationError = null;
+      _syncResult = null;
+      _syncStatusMessage = isLocalRouter
+          ? 'جاري فحص الاتصال وتجربة إضافة مستخدم تجريبي في الراوتر...'
+          : 'جارٍ توليد وتشفير الكروت بأمان...';
     });
 
+    // 1. If local router: Execute Pre-Flight Probe directly on device
+    if (isLocalRouter) {
+      final probeResult = await LocalCardSyncService.probeRouter(
+        router: _selectedRouter!,
+        profile: _selectedPackage!.hotspotProfileName,
+      );
+
+      if (probeResult['success'] != true) {
+        if (!mounted) return;
+        setState(() {
+          _isGenerating = false;
+          _generationError = probeResult['errorMessage'] ??
+              'تعذر الاتصال بالراوتر المحلي للتحقق من الجاهزية قبل التوليد.';
+          _syncStatusMessage = null;
+        });
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _syncStatusMessage = 'نجح فحص الراوتر! جارٍ حفظ الكروت في السيرفر...';
+        });
+      }
+    }
+
+    // 2. Call backend to generate batch
+    // For local routers, pass routerId: null so cloud backend saves cards without attempting direct router connection
     final result = await ApiClient.generateCardBatch(
       packageId: _selectedPackage!.id,
       quantity: quantity,
-      routerId: _selectedRouter?.id,
+      routerId: isLocalRouter ? null : _selectedRouter?.id,
       prefix: _prefixController.text.trim().isEmpty
           ? null
           : _prefixController.text.trim(),
@@ -265,25 +306,121 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     if (result['success'] == true) {
       final batch = result['data']['batch'] as CardBatchModel;
       final cards = result['data']['cards'] as List<CardModel>;
+
+      // 3. If local router, sync cards directly from device to router
+      BatchSyncResult? syncResult;
+      if (isLocalRouter && cards.isNotEmpty) {
+        setState(() {
+          _syncProgressCurrent = 0;
+          _syncProgressTotal = cards.length;
+          _syncStatusMessage = 'جاري رفع الكروت إلى الراوتر (0/${cards.length})...';
+        });
+
+        syncResult = await LocalCardSyncService.syncCardsToRouter(
+          router: _selectedRouter!,
+          cards: cards,
+          profile: _selectedPackage!.hotspotProfileName,
+          comment: 'Jalsah:${batch.batchNumber}',
+          timeLimit: _selectedPackage!.durationMinutes > 0
+              ? '${_selectedPackage!.durationMinutes}m'
+              : null,
+          onProgress: (current, total, username) {
+            if (mounted) {
+              setState(() {
+                _syncProgressCurrent = current;
+                _syncProgressTotal = total;
+                _syncStatusMessage = 'جاري رفع الكروت إلى الراوتر ($current/$total)...';
+              });
+            }
+          },
+        );
+      }
+
+      if (!mounted) return;
+
       setState(() {
         _isGenerating = false;
         _generatedBatch = batch;
         _generatedCards = cards;
+        _syncResult = syncResult;
         _generationError = null;
+        _syncStatusMessage = null;
       });
     } else {
       if (result['errorCode'] == 'TRIAL_CARD_GENERATION_LOCKED') {
         setState(() {
           _isGenerating = false;
+          _syncStatusMessage = null;
         });
         _showTrialLockDialog();
         return;
       }
       setState(() {
         _isGenerating = false;
+        _syncStatusMessage = null;
         _generationError = result['errorMessage'] ??
             'فشل توليد دفعة الكروت، يرجى المحاولة مرة أخرى.';
       });
+    }
+  }
+
+  Future<void> _resyncPendingCards() async {
+    if (_isResyncing || _selectedRouter == null || _generatedCards == null) return;
+    setState(() {
+      _isResyncing = true;
+      _syncStatusMessage = 'جاري قراءة المستخدمين من الراوتر ومقارنة الكروت...';
+    });
+
+    try {
+      final res = await LocalCardSyncService.resyncPendingCards(
+        router: _selectedRouter!,
+        cards: _generatedCards!,
+        profile: _selectedPackage?.hotspotProfileName,
+        comment: _generatedBatch != null ? 'Jalsah:${_generatedBatch!.batchNumber}' : 'Jalsah:Card',
+        timeLimit: (_selectedPackage?.durationMinutes ?? 0) > 0
+            ? '${_selectedPackage!.durationMinutes}m'
+            : null,
+        onProgress: (current, total, username) {
+          if (mounted) {
+            setState(() {
+              _syncStatusMessage = 'جاري التحقق وإعادة الرفع ($current/$total)...';
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _syncResult = res;
+          _isResyncing = false;
+          _syncStatusMessage = null;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res.success
+                  ? 'تمت مزامنة جميع الكروت في الراوتر بنجاح!'
+                  : 'اكتملت العملية: تم مزامنة ${res.syncedCount} كرت، وتوجد ${res.failedCount} كروت متبقية.',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+            ),
+            backgroundColor: res.success ? AppColors.statusOnline : const Color(0xFFD97706),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isResyncing = false;
+          _syncStatusMessage = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشلت إعادة المزامنة: $e', style: GoogleFonts.cairo()),
+            backgroundColor: AppColors.statusOffline,
+          ),
+        );
+      }
     }
   }
 
@@ -291,6 +428,9 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     setState(() {
       _generatedBatch = null;
       _generatedCards = null;
+      _syncResult = null;
+      _isResyncing = false;
+      _syncStatusMessage = null;
       _generationError = null;
       _quantityController.text = '10';
       _prefixController.clear();
@@ -1242,6 +1382,61 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
             ),
           ),
         ],
+
+        // Sync / Generation Progress Indicator
+        if (_isGenerating && _syncStatusMessage != null) ...[
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppColors.heroGradientStart.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.heroGradientStart.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.heroGradientStart,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _syncStatusMessage!,
+                        style: GoogleFonts.cairo(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.heroGradientStart,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_syncProgressTotal > 0) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: _syncProgressCurrent / _syncProgressTotal,
+                      backgroundColor: AppColors.heroGradientStart.withValues(alpha: 0.15),
+                      valueColor: const AlwaysStoppedAnimation<Color>(AppColors.heroGradientStart),
+                      minHeight: 6,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 26),
 
         // Generate Action Button
@@ -1255,9 +1450,117 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
             colors: [Color(0xFFF5C94B), Color(0xFFE5B535)],
           ),
           icon: Icons.bolt_rounded,
-          label: _isGenerating ? 'جارٍ توليد وتشفير الكروت بأمان...' : 'بدء توليد دفعة الكروت الآن',
+          label: _isGenerating
+              ? (_syncStatusMessage ?? 'جارٍ توليد وتشفير الكروت بأمان...')
+              : 'بدء توليد دفعة الكروت الآن',
         ),
       ],
+    );
+  }
+
+  Widget _buildRouterSyncCard() {
+    final sync = _syncResult;
+    if (sync == null) return const SizedBox.shrink();
+
+    final isAllSynced = sync.success;
+    final color = isAllSynced ? AppColors.statusOnline : const Color(0xFFD97706);
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: color.withValues(alpha: 0.35),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isAllSynced ? Icons.check_circle_rounded : Icons.sync_problem_rounded,
+                color: color,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isAllSynced
+                      ? 'تمت مزامنة جميع الكروت (${sync.syncedCount}/${sync.totalCount}) بالراوتر بنجاح!'
+                      : 'مزامنة جزئية بالراوتر: تم رفع ${sync.syncedCount} كرت، وتوجد ${sync.failedCount} كروت معلقة.',
+                  style: GoogleFonts.cairo(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (sync.errorMessage != null && !isAllSynced) ...[
+            const SizedBox(height: 8),
+            Text(
+              sync.errorMessage!,
+              style: GoogleFonts.cairo(
+                fontSize: 12,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+          if (!isAllSynced && _selectedRouter != null) ...[
+            const SizedBox(height: 12),
+            PressableNeumorphicCard(
+              onTap: _isResyncing ? null : _resyncPendingCards,
+              backgroundColor: AppColors.pageBg,
+              borderRadius: BorderRadius.circular(12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_isResyncing) ...[
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.heroGradientStart,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _syncStatusMessage ?? 'جارٍ فحص الراوتر وإعادة المزامنة...',
+                      style: GoogleFonts.cairo(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.heroGradientStart,
+                      ),
+                    ),
+                  ] else ...[
+                    const Icon(
+                      Icons.sync_rounded,
+                      color: AppColors.heroGradientStart,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'إعادة مزامنة الكروت المعلّقة بالراوتر',
+                      style: GoogleFonts.cairo(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.heroGradientStart,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1351,6 +1654,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
             ],
           ),
         ),
+        _buildRouterSyncCard(),
         const SizedBox(height: 22),
 
         // Section Title: Preview
@@ -1463,40 +1767,62 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                         ],
                       ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Text(
-                            'المرور: ',
-                            style: GoogleFonts.cairo(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textMuted,
+                      if (card.password.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            Text(
+                              'المرور: ',
+                              style: GoogleFonts.cairo(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textMuted,
+                              ),
                             ),
-                          ),
-                          SelectableText(
-                            card.password,
-                            style: GoogleFonts.cairo(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.textDark,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.copy_rounded,
-                              size: 15,
-                              color: AppColors.accentYellow,
-                            ),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            tooltip: 'نسخ كلمة المرور',
-                            onPressed: () => _copyToClipboard(
+                            SelectableText(
                               card.password,
-                              'كلمة المرور',
+                              style: GoogleFonts.cairo(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.textDark,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.copy_rounded,
+                                size: 15,
+                                color: AppColors.accentYellow,
+                              ),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: 'نسخ كلمة المرور',
+                              onPressed: () => _copyToClipboard(
+                                card.password,
+                                'كلمة المرور',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'أرقام فقط (بدون كلمة سر)',
+                                style: GoogleFonts.cairo(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.heroGradientStart,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1518,6 +1844,35 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                     ),
                   ),
                 ),
+
+                // Router Sync Badge
+                if (_syncResult != null) ...[
+                  Builder(
+                    builder: (context) {
+                      final isCardSynced = _syncResult!.items.any(
+                        (it) => (it.cardId == card.id || it.username == card.username) && it.isSynced,
+                      );
+                      return Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isCardSynced
+                              ? AppColors.statusOnline.withValues(alpha: 0.15)
+                              : const Color(0xFFD97706).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isCardSynced ? 'بالراوتر ✓' : 'معلّق ⏳',
+                          style: GoogleFonts.cairo(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isCardSynced ? AppColors.statusOnline : const Color(0xFFD97706),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
                 const SizedBox(width: 6),
 
                 // Voucher Preview Button

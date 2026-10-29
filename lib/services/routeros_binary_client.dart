@@ -469,6 +469,27 @@ class RouterOsBinaryClient {
     return true;
   }
 
+  /// Deletes/removes a HotSpot user directly from the router (/ip/hotspot/user/remove).
+  Future<bool> removeHotspotUser(String username) async {
+    final records = await executeCommand([
+      '/ip/hotspot/user/print',
+      '?name=$username',
+      '=.proplist=.id',
+    ]);
+
+    if (records.isEmpty || records[0]['.id'] == null) {
+      return false;
+    }
+
+    final id = records[0]['.id']!;
+    await executeCommand([
+      '/ip/hotspot/user/remove',
+      '=.id=$id',
+    ]);
+
+    return true;
+  }
+
   /// Parses MikroTik uptime format (e.g. "3w2d1h45m12s" or "1d04:12:30" or "02:14:35") into seconds.
   static int parseRouterOsUptime(dynamic uptimeValue) {
     if (uptimeValue == null) return 0;
