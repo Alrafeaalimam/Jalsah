@@ -5,13 +5,9 @@
 //        and Direct HotSpot Control via Native RouterOS API
 // ============================================================================
 
-import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 
 import 'package:mikrotik_cards_app/models/router_model.dart';
-import 'package:mikrotik_cards_app/services/api_client.dart';
 import 'package:mikrotik_cards_app/services/mikrotik_discovery_service.dart';
 import 'package:mikrotik_cards_app/services/routeros_binary_client.dart';
 
