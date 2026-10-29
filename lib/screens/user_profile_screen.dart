@@ -4,9 +4,13 @@
 // Screen: User Profile & Subscription Management Screen (Rule 14, Rule 20, Rule 26, Phase 14)
 // ============================================================================
 
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../models/subscription_plan_model.dart';
 import '../models/subscription_status_model.dart';
 import '../services/api_client.dart';
 import '../services/app_settings.dart';
@@ -44,17 +48,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String _status = 'ACTIVE';
 
   SubscriptionStatusModel? _subscriptionStatus;
-  List<Map<String, dynamic>> _myRequests = [];
+  List<SubscriptionRequestModel> _myRequests = [];
   bool _isLoadingRequests = false;
-
-  static const List<String> _avatarPresets = [
-    'assets/avatars/avatar_1.png',
-    'assets/avatars/avatar_2.png',
-    'assets/avatars/avatar_3.png',
-    'assets/avatars/avatar_4.png',
-    'assets/avatars/avatar_5.png',
-    'assets/avatars/avatar_6.png',
-  ];
 
   @override
   void initState() {
@@ -108,7 +103,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (reqRes['success'] == true) {
         final list = reqRes['data'] ?? reqRes['requests'];
         if (list is List) {
-          _myRequests = List<Map<String, dynamic>>.from(list);
+          _myRequests = list
+              .map((r) => r is SubscriptionRequestModel
+                  ? r
+                  : SubscriptionRequestModel.fromJson(r as Map<String, dynamic>))
+              .toList();
         }
       }
 
@@ -128,10 +127,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     setState(() => _isLoadingRequests = true);
     try {
       final res = await ApiClient.getMySubscriptionRequests();
-      if (res['success'] == true && res['requests'] is List) {
+      final list = res['data'] ?? res['requests'];
+      if (res['success'] == true && list is List) {
         if (mounted) {
           setState(() {
-            _myRequests = List<Map<String, dynamic>>.from(res['requests']);
+            _myRequests = list
+                .map((r) => r is SubscriptionRequestModel
+                    ? r
+                    : SubscriptionRequestModel.fromJson(r as Map<String, dynamic>))
+                .toList();
           });
         }
       }
@@ -159,6 +163,67 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
   }
 
+  String _getFullAvatarUrl(String url) {
+    if (url.isEmpty) return '';
+    if (url.startsWith('data:image')) return url;
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    if (url.startsWith('/')) return '${ApiClient.baseUrl}$url';
+    return '${ApiClient.baseUrl}/$url';
+  }
+
+  Widget _buildAvatarImage() {
+    if (_avatarUrl.isEmpty) {
+      return const Center(
+        child: Icon(
+          Icons.person_rounded,
+          size: 44,
+          color: Colors.white,
+        ),
+      );
+    }
+    if (_avatarUrl.startsWith('data:image')) {
+      try {
+        final commaIdx = _avatarUrl.indexOf(',');
+        final base64Str = commaIdx != -1 ? _avatarUrl.substring(commaIdx + 1) : _avatarUrl;
+        return Image.memory(
+          base64Decode(base64Str),
+          fit: BoxFit.cover,
+          width: 76,
+          height: 76,
+          errorBuilder: (context, error, stackTrace) => const Center(
+            child: Icon(
+              Icons.person_rounded,
+              size: 44,
+              color: Colors.white,
+            ),
+          ),
+        );
+      } catch (_) {
+        return const Center(
+          child: Icon(
+            Icons.person_rounded,
+            size: 44,
+            color: Colors.white,
+          ),
+        );
+      }
+    }
+    return Image.network(
+      _getFullAvatarUrl(_avatarUrl),
+      headers: ApiClient.authHeaders,
+      fit: BoxFit.cover,
+      width: 76,
+      height: 76,
+      errorBuilder: (context, error, stackTrace) => const Center(
+        child: Icon(
+          Icons.person_rounded,
+          size: 44,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
   void _showAvatarPicker() {
     showModalBottomSheet(
       context: context,
@@ -174,48 +239,74 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'اختر الصورة الرمزية',
+                'تغيير الصورة الشخصية',
                 style: GoogleFonts.cairo(
                   fontSize: 17,
                   fontWeight: FontWeight.w800,
                   color: AppColors.textDark,
                 ),
               ),
-              const SizedBox(height: 18),
-              Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                alignment: WrapAlignment.center,
-                children: _avatarPresets.map((avatar) {
-                  final isSelected = _avatarUrl == avatar;
-                  return GestureDetector(
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await _updateAvatar(avatar);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected ? AppColors.heroGradientStart : Colors.black12,
-                          width: isSelected ? 3 : 1,
-                        ),
-                      ),
-                      child: CircleAvatar(
-                        radius: 26,
-                        backgroundColor: AppColors.heroGradientStart.withValues(alpha: 0.15),
-                        child: const Icon(
-                          Icons.person_rounded,
-                          color: AppColors.heroGradientStart,
-                          size: 28,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.photo_library_rounded, color: AppColors.heroGradientStart),
+                ),
+                title: Text(
+                  'اختيار من معرض الصور',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.gallery);
+                },
               ),
-              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded, color: AppColors.heroGradientStart),
+                ),
+                title: Text(
+                  'التقاط صورة بالكاميرا',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              if (_avatarUrl.isNotEmpty)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.statusOffline.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.delete_outline_rounded, color: AppColors.statusOffline),
+                  ),
+                  title: Text(
+                    'إزالة الصورة الشخصية',
+                    style: GoogleFonts.cairo(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: AppColors.statusOffline,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removeAvatar();
+                  },
+                ),
+              const SizedBox(height: 10),
             ],
           ),
         ),
@@ -223,22 +314,160 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
-  Future<void> _updateAvatar(String newAvatar) async {
-    final res = await ApiClient.updateUserProfile(avatarUrl: newAvatar);
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final XFile? pickedFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (pickedFile == null || !mounted) return;
+
+      final Uint8List imageBytes = await pickedFile.readAsBytes();
+      if (!mounted) return;
+
+      // Show preview confirmation dialog before uploading
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: AppColors.pageBg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              'معاينة الصورة الشخصية',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 17),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.memory(
+                      imageBytes,
+                      fit: BoxFit.cover,
+                      width: 140,
+                      height: 140,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'هل ترغب في حفظ هذه الصورة كصورة لملفك الشخصي؟',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.cairo(fontSize: 13, color: AppColors.textMuted),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx, false),
+                child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () => Navigator.pop(dialogCtx, true),
+                child: Text(
+                  'حفظ وتحديث',
+                  style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (confirmed == true && mounted) {
+        await _uploadAvatar(imageBytes, pickedFile.mimeType ?? 'image/jpeg');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر اختيار الصورة: $e', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  Future<void> _uploadAvatar(Uint8List imageBytes, String mimeType) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            Text('جاري رفع وتحديث الصورة الشخصية...', style: GoogleFonts.cairo()),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+
+    final res = await ApiClient.uploadUserProfileAvatar(
+      imageBytes: imageBytes,
+      mimeType: mimeType,
+    );
     if (!mounted) return;
 
     if (res['success'] == true) {
-      setState(() => _avatarUrl = newAvatar);
+      final newUrl = (res['avatarUrl'] as String?) ?? (res['data']?['avatarUrl'] as String?) ?? '';
+      setState(() => _avatarUrl = newUrl);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('تم تحديث الصورة الرمزية بنجاح', style: GoogleFonts.cairo()),
+          content: Text(res['message'] as String? ?? 'تم تحديث الصورة الشخصية بنجاح', style: GoogleFonts.cairo()),
           backgroundColor: AppColors.statusOnline,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(res['errorMessage'] as String? ?? 'تعذر تحديث الصورة', style: GoogleFonts.cairo()),
+          content: Text(res['errorMessage'] as String? ?? 'تعذر تحديث الصورة الشخصية', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  Future<void> _removeAvatar() async {
+    final res = await ApiClient.updateUserProfile(avatarUrl: '');
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      setState(() => _avatarUrl = '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تمت إزالة الصورة الشخصية بنجاح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'تعذر إزالة الصورة', style: GoogleFonts.cairo()),
           backgroundColor: AppColors.statusOffline,
         ),
       );
@@ -623,22 +852,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         children: [
           Stack(
             children: [
-              Container(
-                width: 76,
-                height: 76,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.4),
-                    width: 2,
+              GestureDetector(
+                onTap: _showAvatarPicker,
+                child: Container(
+                  width: 76,
+                  height: 76,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.4),
+                      width: 2,
+                    ),
                   ),
-                ),
-                child: const Center(
-                  child: Icon(
-                    Icons.person_rounded,
-                    size: 44,
-                    color: Colors.white,
+                  child: ClipOval(
+                    child: _buildAvatarImage(),
                   ),
                 ),
               ),
@@ -950,11 +1178,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             )
           else
             ..._myRequests.map((req) {
-              final status = (req['status'] as String? ?? 'PENDING').toUpperCase();
-              final plan = req['plan'] is Map<String, dynamic> ? req['plan'] as Map<String, dynamic> : {};
-              final planName = plan['name'] as String? ?? req['planName'] as String? ?? 'باقة اشتراك';
-              final price = req['priceSnapshot'] ?? plan['price'] ?? 0;
-              final currency = req['currencySnapshot'] ?? plan['currency'] ?? 'USD';
+              final status = req.status.toUpperCase();
+              final planName = req.planName;
+              final price = req.formattedPrice;
+              final currency = req.currency;
 
               Color badgeColor = const Color(0xFFD97706);
               String badgeText = 'قيد المراجعة';
@@ -1000,14 +1227,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (status == 'PENDING' && req['id'] != null) ...[
+                        if (status == 'PENDING' && req.id.isNotEmpty) ...[
                           TextButton(
                             style: TextButton.styleFrom(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            onPressed: () => _cancelRequest(req['id'].toString()),
+                            onPressed: () => _cancelRequest(req.id),
                             child: Text(
                               'إلغاء',
                               style: GoogleFonts.cairo(
