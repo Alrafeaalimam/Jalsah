@@ -330,7 +330,7 @@ void main() {
 
     test('testRouterConnection returns success with RouterInfo for valid host', () async {
       final result = await ApiClient.testRouterConnection(
-        host: '192.168.88.1',
+        host: 'router.example.com',
         port: 8728,
         username: 'admin',
         password: 'test',

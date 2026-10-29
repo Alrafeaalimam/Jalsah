@@ -235,7 +235,7 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
         !_hasInitError) {
       final size = _controller!.value.size;
       final bool isPlaying = _controller!.value.isPlaying;
-      final aspectRatio = _controller!.value.aspectRatio > 0
+      final videoAspect = _controller!.value.aspectRatio > 0
           ? _controller!.value.aspectRatio
           : (size.width > 0 && size.height > 0 ? size.width / size.height : 16 / 9);
 
@@ -252,33 +252,119 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
           setState(() {});
         },
         child: Container(
-          color: const Color(0xFF0F0E1E),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF0C091C),
+                Color(0xFF171035),
+                Color(0xFF0C091C),
+              ],
+            ),
+          ),
           width: double.infinity,
           height: double.infinity,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Center(
-                child: AspectRatio(
-                  aspectRatio: aspectRatio,
-                  child: VideoPlayer(_controller!),
-                ),
-              ),
-              // Play overlay if browser required user gesture
-              if (!isPlaying && !_hasNavigated)
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    shape: BoxShape.circle,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isPortrait = constraints.maxHeight > constraints.maxWidth;
+              final screenWidth = constraints.maxWidth;
+              final screenHeight = constraints.maxHeight;
+
+              // In portrait mode: scale video so the subject (logo + text, width ~450px out of 1280)
+              // occupies ~80% of screen width with comfortable safe margins on both sides,
+              // while excess empty video borders are smoothly masked.
+              final double videoWidth;
+              final double videoHeight;
+
+              if (isPortrait) {
+                // Target: 450px content = 80% screen width
+                // Scaled full video width = (0.80 * screenWidth / 450) * 1280
+                final scaledW = (0.80 * screenWidth / 450) * 1280;
+                final scaledH = scaledW / videoAspect;
+
+                // Ensure height does not overflow screen
+                if (scaledH > screenHeight * 0.85) {
+                  videoHeight = screenHeight * 0.85;
+                  videoWidth = videoHeight * videoAspect;
+                } else {
+                  videoWidth = scaledW;
+                  videoHeight = scaledH;
+                }
+              } else {
+                // Landscape / Tablet mode: fit comfortably within bounds
+                if (screenWidth / screenHeight > videoAspect) {
+                  videoHeight = screenHeight * 0.90;
+                  videoWidth = videoHeight * videoAspect;
+                } else {
+                  videoWidth = screenWidth * 0.90;
+                  videoHeight = videoWidth / videoAspect;
+                }
+              }
+
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Subtle ambient background glow matching the video theme
+                  Container(
+                    width: screenWidth * 0.7,
+                    height: screenWidth * 0.7,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF54359F).withValues(alpha: 0.25),
+                          blurRadius: 90,
+                          spreadRadius: 30,
+                        ),
+                      ],
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.play_arrow_rounded,
-                    size: 48,
-                    color: Colors.white,
+
+                  // The video player with vertical edge gradient fade mask (seamless blend)
+                  Center(
+                    child: ClipRect(
+                      child: ShaderMask(
+                        shaderCallback: (rect) {
+                          return const LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black,
+                              Colors.black,
+                              Colors.transparent,
+                            ],
+                            stops: [0.0, 0.05, 0.95, 1.0],
+                          ).createShader(rect);
+                        },
+                        blendMode: BlendMode.dstIn,
+                        child: SizedBox(
+                          width: videoWidth,
+                          height: videoHeight,
+                          child: VideoPlayer(_controller!),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-            ],
+
+                  // Play overlay if user gesture required
+                  if (!isPlaying && !_hasNavigated)
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        size: 48,
+                        color: Colors.white,
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       );
@@ -286,7 +372,17 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
 
     // Fallback UI if video is loading or unsupported
     return Container(
-      color: const Color(0xFF0F0E1E),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF0C091C),
+            Color(0xFF171035),
+            Color(0xFF0C091C),
+          ],
+        ),
+      ),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -391,7 +487,7 @@ class _SplashVideoScreenState extends State<SplashVideoScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: const Color(0xFF0C091C),
         body: Stack(
           children: [
             _buildVideoContent(),

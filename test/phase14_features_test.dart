@@ -169,6 +169,20 @@ void main() {
             'success': true,
             'data': [],
           }, 200);
+        } else if (request.url.path.contains('/subscription/payment-methods')) {
+          return _jsonResponse({
+            'success': true,
+            'data': [
+              {
+                'id': 'pm-1',
+                'providerName': 'بنكك (بنك الخرطوم)',
+                'accountName': 'محمد أحمد',
+                'accountNumber': '1234567',
+                'currency': 'SDG',
+                'isActive': true,
+              }
+            ],
+          }, 200);
         } else if (request.url.path.contains('/subscription/request-activation')) {
           return _jsonResponse({
             'success': true,
@@ -207,13 +221,24 @@ void main() {
       await tester.tap(find.text('طلب التفعيل والاشتراك'));
       await tester.pumpAndSettle();
 
-      // Dialog confirmation appears
+      // Bottom sheet confirmation appears
       expect(find.text('طلب تفعيل اشتراك Jalsah'), findsOneWidget);
-      await tester.tap(find.text('تأكيد وإرسال الطلب'));
+      await tester.enterText(find.byType(TextField).first, 'أحمد علي محمد');
+      await tester.enterText(find.byType(TextField).at(1), 'TRX-123456');
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('تأكيد وإرسال طلب الاشتراك'),
+        100,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('تأكيد وإرسال طلب الاشتراك'));
       await tester.pumpAndSettle();
 
       // Snackbar success is shown
-      expect(find.text('تم إرسال طلب التفعيل بنجاح وسيتم مراجعته'), findsOneWidget);
+      expect(find.textContaining('تم إرسال طلب التفعيل بنجاح'), findsOneWidget);
     });
   });
 

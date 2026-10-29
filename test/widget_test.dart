@@ -11,6 +11,7 @@ import 'package:http/testing.dart';
 import 'package:mikrotik_cards_app/screens/dashboard_screen.dart';
 import 'package:mikrotik_cards_app/screens/add_router_screen.dart';
 import 'package:mikrotik_cards_app/services/api_client.dart';
+import 'package:mikrotik_cards_app/services/mikrotik_discovery_service.dart';
 import 'package:mikrotik_cards_app/theme/app_colors.dart';
 import 'package:mikrotik_cards_app/widgets/count_up_text.dart';
 import 'package:mikrotik_cards_app/widgets/neumorphic_text_field.dart';
@@ -370,6 +371,27 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       bool postReceived = false;
+
+      MikrotikDiscoveryService.directConnectionTester = ({
+        required String host,
+        required int port,
+        required String username,
+        required String password,
+        String? connectionMethod,
+        Duration timeout = const Duration(seconds: 6),
+      }) async {
+        return {
+          'success': true,
+          'data': {
+            'identity': 'راوتر تجريبي',
+            'version': '7.15',
+            'boardName': 'hEX',
+            'cpuLoad': 5,
+            'uptimeSeconds': 3600,
+          },
+        };
+      };
+      addTearDown(() => MikrotikDiscoveryService.directConnectionTester = null);
 
       ApiClient.client = MockClient((request) async {
         if (request.method == 'POST' && request.url.path.endsWith('/routers')) {

@@ -381,7 +381,7 @@ void main() {
       }
 
       // Tap on Tab 2: أكواد الترخيص
-      await tester.tap(find.byType(Tab).at(1), warnIfMissed: false);
+      await tester.tap(find.byType(Tab).at(2), warnIfMissed: false);
       await tester.pumpAndSettle();
 
       // Verify existing code is shown

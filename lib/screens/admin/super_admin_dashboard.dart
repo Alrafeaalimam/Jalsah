@@ -5,6 +5,8 @@
 // Master Reference: Super Admin Panel & License Code System
 // ============================================================================
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -13,6 +15,7 @@ import '../../models/admin_tenant_model.dart';
 import '../../models/license_code_model.dart';
 import '../../models/platform_settings_model.dart';
 import '../../models/staff_user_model.dart';
+import '../../models/subscription_plan_model.dart';
 import '../../services/api_client.dart';
 import '../../services/app_settings.dart';
 import '../../theme/app_colors.dart';
@@ -39,11 +42,19 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
 
   bool _isLoadingTenants = false;
   bool _isLoadingCodes = false;
+  bool _isLoadingPlans = false;
   String? _tenantsError;
   String? _codesError;
+  String? _plansError;
 
   List<AdminTenantModel> _tenants = [];
   List<LicenseCodeModel> _codes = [];
+  List<SubscriptionPlanModel> _subscriptionPlans = [];
+  List<Map<String, dynamic>> _subscriptionRequests = [];
+  bool _isLoadingRequests = false;
+  List<ManualPaymentMethodModel> _paymentMethods = [];
+  bool _isLoadingMethods = false;
+  String? _methodsError;
 
   String _tenantSearchQuery = '';
   String _tenantFilter = 'ALL'; // ALL, PENDING, ACTIVE, SUSPENDED
@@ -62,7 +73,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _supportEmailController =
         TextEditingController(text: AppSettings.instance.supportEmail);
     _appNameController =
@@ -85,7 +96,230 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
       _loadTenants(),
       _loadCodes(),
       _loadPlatformSettings(),
+      _loadSubscriptionPlans(),
+      _loadSubscriptionRequests(),
+      _loadPaymentMethods(),
     ]);
+  }
+
+  Future<void> _loadSubscriptionPlans() async {
+    setState(() {
+      _isLoadingPlans = true;
+      _plansError = null;
+    });
+
+    try {
+      final res = await ApiClient.getAdminSubscriptionPlans();
+      if (!mounted) return;
+
+      if (res['success'] == true && res['data'] is List<SubscriptionPlanModel>) {
+        setState(() {
+          _subscriptionPlans = res['data'] as List<SubscriptionPlanModel>;
+          _isLoadingPlans = false;
+        });
+      } else {
+        setState(() {
+          _subscriptionPlans = [];
+          _plansError = res['errorMessage'] as String? ?? 'تعذر تحميل باقات الاشتراك';
+          _isLoadingPlans = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _subscriptionPlans = [];
+        _plansError = 'تعذر الاتصال بالخادم لجلب باقات الاشتراك: $e';
+        _isLoadingPlans = false;
+      });
+    }
+  }
+
+  Future<void> _loadPaymentMethods() async {
+    setState(() {
+      _isLoadingMethods = true;
+      _methodsError = null;
+    });
+
+    try {
+      final res = await ApiClient.getAdminPaymentMethods();
+      if (!mounted) return;
+
+      if (res['success'] == true && res['data'] is List<ManualPaymentMethodModel>) {
+        setState(() {
+          _paymentMethods = res['data'] as List<ManualPaymentMethodModel>;
+          _isLoadingMethods = false;
+        });
+      } else {
+        setState(() {
+          _paymentMethods = [];
+          _methodsError = res['errorMessage'] as String? ?? 'تعذر تحميل وسائل الدفع';
+          _isLoadingMethods = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _paymentMethods = [];
+        _methodsError = 'تعذر الاتصال بالخادم لجلب وسائل الدفع: $e';
+        _isLoadingMethods = false;
+      });
+    }
+  }
+
+  Future<void> _loadSubscriptionRequests() async {
+    setState(() {
+      _isLoadingRequests = true;
+    });
+
+    try {
+      final res = await ApiClient.getAdminSubscriptionRequests();
+      if (!mounted) return;
+
+      if (res['success'] == true && res['data'] is List) {
+        setState(() {
+          _subscriptionRequests = List<Map<String, dynamic>>.from(res['data']);
+          _isLoadingRequests = false;
+        });
+      } else {
+        setState(() {
+          _subscriptionRequests = [];
+          _isLoadingRequests = false;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _subscriptionRequests = [];
+        _isLoadingRequests = false;
+      });
+    }
+  }
+
+  Future<void> _approveSubscriptionRequest(
+    String requestId, {
+    String? tenantName,
+    String? planName,
+    int? durationDays,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('تأكيد الموافقة والتفعيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+          content: Text(
+            tenantName != null
+                ? 'هل أنت متأكد من تفعيل اشتراك "$tenantName" على $planName لمدة $durationDays يوم؟ سيتم تفعيل حساب المستأجر فوراً وتحديث صلاحية الراوترات.'
+                : 'هل أنت متأكد من تفعيل هذا الاشتراك وتمديد صلاحية المستأجر؟',
+            style: GoogleFonts.cairo(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo()),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusOnline,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('تأكيد التفعيل', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final res = await ApiClient.approveAdminSubscriptionRequest(requestId);
+    if (!mounted) return;
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] as String? ?? 'تمت الموافقة وتفعيل الاشتراك بنجاح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+      _loadSubscriptionRequests();
+      _loadTenants();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'فشلت عملية الموافقة', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  Future<void> _rejectSubscriptionRequest(String requestId) async {
+    final reasonController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('رفض طلب الاشتراك', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('هل أنت متأكد من رغبتك في رفض هذا الطلب؟', style: GoogleFonts.cairo(fontSize: 13)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                decoration: InputDecoration(
+                  hintText: 'سبب الرفض (اختياري)',
+                  hintStyle: GoogleFonts.cairo(fontSize: 12),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo()),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusOffline,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('تأكيد الرفض', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final res = await ApiClient.rejectAdminSubscriptionRequest(
+        requestId,
+        reason: reasonController.text.trim(),
+      );
+      if (!mounted) return;
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] as String? ?? 'تم رفض الطلب بنجاح', style: GoogleFonts.cairo()),
+            backgroundColor: AppColors.statusOnline,
+          ),
+        );
+        _loadSubscriptionRequests();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['errorMessage'] as String? ?? 'فشل رفض الطلب', style: GoogleFonts.cairo()),
+            backgroundColor: AppColors.statusOffline,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadPlatformSettings() async {
@@ -1393,6 +1627,12 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
                               text: 'الشركات والشبكات (${_tenants.length})',
                             ),
                             Tab(
+                              icon: const Icon(Icons.card_membership_rounded, size: 20),
+                              text: _subscriptionRequests.any((r) => r['status'] == 'PENDING')
+                                  ? 'باقات الاشتراك (${_subscriptionPlans.length}) [طلب جديد]'
+                                  : 'باقات الاشتراك (${_subscriptionPlans.length})',
+                            ),
+                            Tab(
                               icon: const Icon(Icons.vpn_key_rounded, size: 20),
                               text: 'أكواد الترخيص (${_codes.length})',
                             ),
@@ -1414,6 +1654,7 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
               controller: _tabController,
               children: [
                 _buildTenantsTab(),
+                _buildSubscriptionPlansTab(),
                 _buildCodesTab(),
                 _buildSettingsTab(),
               ],
@@ -2203,6 +2444,1603 @@ class _SuperAdminDashboardScreenState extends State<SuperAdminDashboardScreen>
         ),
       ],
     );
+  }
+
+  // --------------------------------------------------------------------------
+  // SUBSCRIPTION PLANS TAB & MANAGEMENT (Super Admin)
+  // --------------------------------------------------------------------------
+
+  Widget _buildSubscriptionPlansTab() {
+    if (_isLoadingPlans) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.heroGradientStart));
+    }
+
+    if (_plansError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline_rounded, size: 48, color: AppColors.statusOffline),
+              const SizedBox(height: 12),
+              Text(
+                _plansError!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.cairo(color: AppColors.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: _loadSubscriptionPlans,
+                icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 18),
+                label: Text('إعادة المحاولة', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async {
+        await Future.wait([
+          _loadSubscriptionPlans(),
+          _loadSubscriptionRequests(),
+          _loadPaymentMethods(),
+        ]);
+      },
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+        children: [
+          // Section 1: Tenant Subscription & Activation Requests
+          _buildSubscriptionRequestsSection(),
+          const SizedBox(height: 28),
+
+          // Section 2: Header Card with Action Button for Subscription Plans
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.heroGradientStart.withValues(alpha: 0.2)),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.shadowDark.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.card_membership_rounded,
+                        color: AppColors.heroGradientStart,
+                        size: 26,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'إدارة باقات الاشتراك والأسعار',
+                            style: GoogleFonts.cairo(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                          Text(
+                            'تحديد أسعار الباقات، مدتها، وسقف الراوترات، والتحكم في تفعيلها',
+                            style: GoogleFonts.cairo(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.heroGradientStart,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () => _showCreateOrEditPlanDialog(),
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  label: Text(
+                    'إضافة باقة اشتراك جديدة',
+                    style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          if (_subscriptionPlans.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.shadowDark.withValues(alpha: 0.4)),
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.textMuted),
+                  const SizedBox(height: 12),
+                  Text(
+                    'لا توجد باقات اشتراك مضافة حتى الآن',
+                    style: GoogleFonts.cairo(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textDark),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'انقر على "إضافة باقة اشتراك جديدة" للبدء في طرح باقاتك التجارية للعملاء.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            )
+          else
+            ..._subscriptionPlans.map((plan) => _buildAdminPlanCard(plan)),
+
+          const SizedBox(height: 28),
+
+          // Section 3: Header Card with Action Button for Manual Payment Methods
+          _buildPaymentMethodsSection(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubscriptionRequestsSection() {
+    final pendingCount = _subscriptionRequests.where((r) => r['status'] == 'PENDING').length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.pending_actions_rounded, color: AppColors.heroGradientStart, size: 22),
+                const SizedBox(width: 8),
+                Text(
+                  'طلبات اشتراك وتفعيل المستأجرين',
+                  style: GoogleFonts.cairo(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ],
+            ),
+            if (pendingCount > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.statusWarning.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '$pendingCount معلق',
+                  style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.statusWarning,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (_isLoadingRequests)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.heroGradientStart)),
+          )
+        else if (_subscriptionRequests.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.shadowDark.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.inbox_outlined, size: 36, color: AppColors.textMuted),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    'لا توجد طلبات اشتراك معلقة حالياً. ستظهر هنا طلبات العملاء لتفعيل وتجديد باقاتهم.',
+                    style: GoogleFonts.cairo(fontSize: 13, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ..._subscriptionRequests.map((req) => _buildSubscriptionRequestCard(req)),
+      ],
+    );
+  }
+
+  Widget _buildSubscriptionRequestCard(Map<String, dynamic> req) {
+    final status = (req['status'] as String? ?? 'PENDING').toUpperCase();
+    final isPending = status == 'PENDING';
+    final isApproved = status == 'APPROVED';
+    final plan = req['plan'] as Map<String, dynamic>?;
+    final planName = plan?['name'] ?? req['planName'] ?? 'باقة تجارية';
+    final price = req['priceSnapshot'] ?? plan?['price'] ?? req['price'] ?? '';
+    final currency = req['currencySnapshot'] ?? plan?['currency'] ?? req['currency'] ?? 'SDG';
+    final durationDays = req['durationDaysSnapshot'] ?? plan?['durationDays'] ?? req['durationDays'] ?? 30;
+    final tenant = req['tenant'] as Map<String, dynamic>?;
+    final tenantName = tenant?['name'] ?? req['tenantName'] ?? req['tenantId'] ?? 'مستأجر';
+    final senderName = req['senderName'] as String?;
+    final referenceNumber = req['referenceNumber'] as String?;
+    final receiptUrl = req['receiptUrl'] as String?;
+    final paymentMethod = req['paymentMethod'] as Map<String, dynamic>?;
+    final paymentProvider = paymentMethod?['providerName'] as String? ??
+        (req['paymentMethod'] is String ? req['paymentMethod'] as String : null);
+    final paymentAccount = paymentMethod?['accountNumber'] as String?;
+    final notes = req['notes'] as String?;
+    final reviewNotes = req['reviewNotes'] as String?;
+    final requestId = req['id'] as String? ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isPending
+              ? AppColors.statusWarning.withValues(alpha: 0.4)
+              : AppColors.shadowDark.withValues(alpha: 0.5),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  tenantName,
+                  style: GoogleFonts.cairo(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isApproved
+                      ? AppColors.statusOnline.withValues(alpha: 0.12)
+                      : isPending
+                          ? AppColors.statusWarning.withValues(alpha: 0.12)
+                          : AppColors.statusOffline.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  isApproved
+                      ? 'تمت الموافقة'
+                      : isPending
+                          ? 'قيد المراجعة'
+                          : 'مرفوض',
+                  style: GoogleFonts.cairo(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: isApproved
+                        ? AppColors.statusOnline
+                        : isPending
+                            ? AppColors.statusWarning
+                            : AppColors.statusOffline,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.card_membership_outlined, size: 16, color: AppColors.textMuted),
+              const SizedBox(width: 6),
+              Text(
+                '$planName - $price $currency ($durationDays يوم)',
+                style: GoogleFonts.cairo(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.heroGradientStart,
+                ),
+              ),
+            ],
+          ),
+          if (senderName != null || referenceNumber != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                if (senderName != null)
+                  Expanded(
+                    child: Text(
+                      'المحول: $senderName',
+                      style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textDark, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                if (referenceNumber != null) ...[
+                  Text(
+                    'رقم العملية: $referenceNumber',
+                    style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.copy_rounded, size: 14, color: AppColors.heroGradientStart),
+                    tooltip: 'نسخ رقم العملية',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: referenceNumber));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('تم نسخ رقم العملية: $referenceNumber', style: GoogleFonts.cairo())),
+                      );
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ],
+          if (paymentProvider != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'طريقة التحويل: $paymentProvider ${paymentAccount != null ? "($paymentAccount)" : ""}',
+              style: GoogleFonts.cairo(fontSize: 11.5, color: AppColors.textMuted),
+            ),
+          ],
+          if (notes != null && notes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'ملاحظات العميل: $notes',
+              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+            ),
+          ],
+          if (receiptUrl != null && receiptUrl.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  side: const BorderSide(color: AppColors.heroGradientStart),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                ),
+                onPressed: () => _showReceiptPreview(receiptUrl),
+                icon: const Icon(Icons.receipt_long_rounded, size: 16, color: AppColors.heroGradientStart),
+                label: Text(
+                  'معاينة صورة إشعار التحويل',
+                  style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.heroGradientStart),
+                ),
+              ),
+            ),
+          ],
+          if (reviewNotes != null && reviewNotes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'ملاحظة الإدارة: $reviewNotes',
+                style: GoogleFonts.cairo(fontSize: 11.5, color: const Color(0xFF991B1B)),
+              ),
+            ),
+          ],
+          if (isPending) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.statusOnline,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onPressed: () => _approveSubscriptionRequest(
+                      requestId,
+                      tenantName: tenantName,
+                      planName: planName,
+                      durationDays: durationDays is int ? durationDays : int.tryParse(durationDays.toString()),
+                    ),
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: Text('موافقة وتفعيل', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.statusOffline,
+                      side: const BorderSide(color: AppColors.statusOffline),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onPressed: () => _rejectSubscriptionRequest(requestId),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: Text('رفض الطلب', style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminPlanCard(SubscriptionPlanModel plan) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: plan.isActive
+              ? AppColors.heroGradientStart.withValues(alpha: 0.3)
+              : AppColors.shadowDark.withValues(alpha: 0.6),
+          width: plan.isActive ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  plan.name,
+                  style: GoogleFonts.cairo(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: plan.isActive
+                      ? AppColors.statusOnline.withValues(alpha: 0.12)
+                      : Colors.black12,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 4,
+                      backgroundColor: plan.isActive ? AppColors.statusOnline : Colors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      plan.isActive ? 'نشطة للعملاء' : 'معطلة',
+                      style: GoogleFonts.cairo(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: plan.isActive ? AppColors.statusOnline : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${plan.formattedPrice} ${plan.currency}',
+                  style: GoogleFonts.cairo(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.heroGradientStart,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${plan.durationDays} يوم',
+                  style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'سقف: ${plan.maxRoutersLimit} راوترات',
+                  style: GoogleFonts.cairo(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textDark),
+                ),
+              ),
+            ],
+          ),
+          if (plan.description != null && plan.description!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              plan.description!,
+              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+            ),
+          ],
+          const Divider(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => _showCreateOrEditPlanDialog(plan),
+                icon: const Icon(Icons.edit_rounded, size: 16, color: AppColors.heroGradientStart),
+                label: Text('تعديل', style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.heroGradientStart)),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => _togglePlanActive(plan),
+                icon: Icon(
+                  plan.isActive ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  size: 20,
+                  color: plan.isActive ? AppColors.statusOnline : Colors.grey,
+                ),
+                label: Text(
+                  plan.isActive ? 'تعطيل' : 'تفعيل',
+                  style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700, color: plan.isActive ? Colors.red.shade700 : AppColors.statusOnline),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => _deleteOrDeactivatePlan(plan),
+                icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.statusOffline),
+                label: Text('حذف / أرشفة', style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.statusOffline)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateOrEditPlanDialog([SubscriptionPlanModel? planToEdit]) {
+    final isEditing = planToEdit != null;
+    final nameCtrl = TextEditingController(text: planToEdit?.name ?? '');
+    final priceCtrl = TextEditingController(text: planToEdit != null ? planToEdit.price.toString() : '');
+    final currencyCtrl = TextEditingController(text: planToEdit?.currency ?? 'SDG');
+    final durationCtrl = TextEditingController(text: planToEdit != null ? planToEdit.durationDays.toString() : '30');
+    final maxRoutersCtrl = TextEditingController(text: planToEdit != null ? planToEdit.maxRoutersLimit.toString() : '5');
+    final descCtrl = TextEditingController(text: planToEdit?.description ?? '');
+    bool isActive = planToEdit?.isActive ?? true;
+    bool isSaving = false;
+    String? formError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: AppColors.pageBg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              isEditing ? 'تعديل باقة الاشتراك والأسعار' : 'إضافة باقة اشتراك جديدة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 17),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (formError != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.statusOffline.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        formError!,
+                        style: GoogleFonts.cairo(fontSize: 12, color: AppColors.statusOffline, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'اسم الباقة *',
+                      hintText: 'مثال: باقة شهر واحد، باقة 3 أشهر',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: priceCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            labelText: 'السعر *',
+                            hintText: '15000',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 1,
+                        child: TextField(
+                          controller: currencyCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'العملة',
+                            hintText: 'SDG',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: durationCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'المدة (بالأيام) *',
+                            hintText: '30',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: maxRoutersCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: 'سقف الراوترات',
+                            hintText: '5',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: descCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'وصف ومزايا الباقة',
+                      hintText: 'مزايا أو تفاصيل توضح للمستأجر ما تتضمنه الباقة...',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13),
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('تفعيل الباقة للعملاء', style: GoogleFonts.cairo(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                    subtitle: Text('إذا تم التعطيل، لن تظهر في قائمة اختيار الباقات للمستخدمين', style: GoogleFonts.cairo(fontSize: 11, color: AppColors.textMuted)),
+                    value: isActive,
+                    activeThumbColor: AppColors.heroGradientStart,
+                    onChanged: (val) => setDialogState(() => isActive = val),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(dialogCtx),
+                child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final name = nameCtrl.text.trim();
+                        final price = double.tryParse(priceCtrl.text.trim());
+                        final duration = int.tryParse(durationCtrl.text.trim());
+                        final maxRouters = int.tryParse(maxRoutersCtrl.text.trim()) ?? 5;
+                        final currency = currencyCtrl.text.trim().isEmpty ? 'SDG' : currencyCtrl.text.trim();
+
+                        if (name.isEmpty) {
+                          setDialogState(() => formError = 'يرجى إدخال اسم الباقة');
+                          return;
+                        }
+                        if (price == null || price <= 0) {
+                          setDialogState(() => formError = 'يرجى إدخال سعر صحيح أكبر من صفر');
+                          return;
+                        }
+                        if (duration == null || duration <= 0) {
+                          setDialogState(() => formError = 'يرجى تحديد المدة بالأيام (يوم واحد على الأقل)');
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isSaving = true;
+                          formError = null;
+                        });
+
+                        final res = isEditing
+                            ? await ApiClient.updateAdminSubscriptionPlan(
+                                planToEdit.id,
+                                name: name,
+                                price: price,
+                                currency: currency,
+                                durationDays: duration,
+                                maxRoutersLimit: maxRouters,
+                                description: descCtrl.text.trim(),
+                                isActive: isActive,
+                              )
+                            : await ApiClient.createAdminSubscriptionPlan(
+                                name: name,
+                                price: price,
+                                currency: currency,
+                                durationDays: duration,
+                                maxRoutersLimit: maxRouters,
+                                description: descCtrl.text.trim(),
+                                isActive: isActive,
+                              );
+
+                        if (!mounted) return;
+                        if (res['success'] == true) {
+                          if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res['message'] as String? ?? 'تم حفظ الباقة بنجاح', style: GoogleFonts.cairo()),
+                              backgroundColor: AppColors.statusOnline,
+                            ),
+                          );
+                          _loadSubscriptionPlans();
+                        } else {
+                          setDialogState(() {
+                            isSaving = false;
+                            formError = res['errorMessage'] as String? ?? 'حدث خطأ أثناء حفظ الباقة';
+                          });
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(
+                        isEditing ? 'حفظ التعديلات' : 'إضافة الباقة',
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.w700, color: Colors.white),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePlanActive(SubscriptionPlanModel plan) async {
+    final res = await ApiClient.toggleAdminSubscriptionPlanActive(plan.id);
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            res['message'] as String? ?? 'تم تغيير حالة تفعيل الباقة بنجاح',
+            style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+          ),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+      _loadSubscriptionPlans();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'تعذر تغيير حالة الباقة', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteOrDeactivatePlan(SubscriptionPlanModel plan) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: AppColors.pageBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('تأكيد حذف أو أرشفة الباقة', style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16)),
+          content: Text(
+            'هل أنت متأكد من رغبتك في حذف الباقة "${plan.name}"؟\n\n'
+            'ملاحظة أمان: في حال وجود اشتراكات سابقة للعملاء مرتبطة بهذه الباقة، سيتم تعطيلها تلقائياً بدلاً من حذفها لحماية سلامة بيانات وسجلات المستخدمين.',
+            style: GoogleFonts.cairo(fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusOffline,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('تأكيد', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final res = await ApiClient.deleteAdminSubscriptionPlan(plan.id);
+      if (!mounted) return;
+
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res['message'] as String? ?? 'تمت العملية بنجاح',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w700),
+            ),
+            backgroundColor: AppColors.statusOnline,
+          ),
+        );
+        _loadSubscriptionPlans();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['errorMessage'] as String? ?? 'فشل تنفيذ العملية', style: GoogleFonts.cairo()),
+            backgroundColor: AppColors.statusOffline,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showReceiptPreview(String receiptUrl) {
+    Widget imageWidget;
+    if (receiptUrl.startsWith('data:image/')) {
+      try {
+        final commaIdx = receiptUrl.indexOf(',');
+        final base64Str = commaIdx != -1 ? receiptUrl.substring(commaIdx + 1) : receiptUrl;
+        final Uint8List bytes = base64Decode(base64Str);
+        imageWidget = Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (c, e, s) => _buildReceiptErrorWidget(),
+        );
+      } catch (_) {
+        imageWidget = _buildReceiptErrorWidget();
+      }
+    } else {
+      final fullUrl = receiptUrl.startsWith('http')
+          ? receiptUrl
+          : '${ApiClient.baseUrl}$receiptUrl';
+      imageWidget = Image.network(
+        fullUrl,
+        headers: ApiClient.authHeaders,
+        fit: BoxFit.contain,
+        loadingBuilder: (c, child, progress) {
+          if (progress == null) return child;
+          return const Padding(
+            padding: EdgeInsets.all(40),
+            child: Center(
+              child: CircularProgressIndicator(color: AppColors.heroGradientStart),
+            ),
+          );
+        },
+        errorBuilder: (c, error, stack) => _buildReceiptErrorWidget(),
+      );
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'معاينة إشعار التحويل البنكي',
+                      style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                child: imageWidget,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceiptErrorWidget() {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.broken_image_outlined, size: 48, color: AppColors.statusOffline),
+          const SizedBox(height: 8),
+          Text(
+            'تعذر تحميل صورة إشعار التحويل',
+            style: GoogleFonts.cairo(fontSize: 13, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentMethodsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.heroGradientStart.withValues(alpha: 0.2)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.shadowDark.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_rounded,
+                      color: AppColors.heroGradientStart,
+                      size: 26,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'بيانات ووسائل التحويل البنكي',
+                          style: GoogleFonts.cairo(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        Text(
+                          'إدارة الحسابات البنكية والمحافظ التي تظهر للعملاء لسداد الاشتراكات',
+                          style: GoogleFonts.cairo(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onPressed: () => _showCreateOrEditPaymentMethodDialog(),
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: Text(
+                  'إضافة وسيلة دفع جديدة',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w700, fontSize: 13.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (_isLoadingMethods)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.heroGradientStart)),
+          )
+        else if (_methodsError != null)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.statusOffline.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 36, color: AppColors.statusOffline),
+                const SizedBox(height: 8),
+                Text(
+                  _methodsError!,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.cairo(fontSize: 12.5, color: AppColors.statusOffline),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: _loadPaymentMethods,
+                  child: Text('إعادة المحاولة', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          )
+        else if (_paymentMethods.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.shadowDark.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_outlined, size: 36, color: AppColors.textMuted),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    'لم تتم إضافة حسابات بنكية حتى الآن. انقر على "إضافة وسيلة دفع جديدة" لتحديد حسابات التحويل للمشتركين.',
+                    style: GoogleFonts.cairo(fontSize: 12.5, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ..._paymentMethods.map((m) => _buildAdminPaymentMethodCard(m)),
+      ],
+    );
+  }
+
+  Widget _buildAdminPaymentMethodCard(ManualPaymentMethodModel method) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: method.isActive
+              ? AppColors.heroGradientStart.withValues(alpha: 0.3)
+              : AppColors.shadowDark.withValues(alpha: 0.6),
+          width: method.isActive ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.shadowDark.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  method.providerName,
+                  style: GoogleFonts.cairo(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.heroGradientStart,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: method.isActive
+                      ? AppColors.statusOnline.withValues(alpha: 0.12)
+                      : Colors.black12,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 4,
+                      backgroundColor: method.isActive ? AppColors.statusOnline : Colors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      method.isActive ? 'متاحة للعملاء' : 'معطلة',
+                      style: GoogleFonts.cairo(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: method.isActive ? AppColors.statusOnline : Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'اسم صاحب الحساب: ${method.accountName}',
+            style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textDark),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'رقم الحساب: ${method.accountNumber}',
+                  style: GoogleFonts.cairo(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.textDark),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.copy_rounded, size: 16, color: AppColors.heroGradientStart),
+                tooltip: 'نسخ رقم الحساب',
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: method.accountNumber));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('تم نسخ رقم الحساب', style: GoogleFonts.cairo())),
+                  );
+                },
+              ),
+            ],
+          ),
+          if (method.beneficiaryName != null && method.beneficiaryName!.isNotEmpty) ...[
+            Text(
+              'المستفيد / الآيبان: ${method.beneficiaryName}',
+              style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+            ),
+          ],
+          if (method.instructions != null && method.instructions!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                method.instructions!,
+                style: GoogleFonts.cairo(fontSize: 11.5, color: const Color(0xFF1E40AF)),
+              ),
+            ),
+          ],
+          const Divider(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: () => _showCreateOrEditPaymentMethodDialog(method),
+                icon: const Icon(Icons.edit_rounded, size: 16, color: AppColors.heroGradientStart),
+                label: Text('تعديل', style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.heroGradientStart)),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => _togglePaymentMethodActive(method),
+                icon: Icon(
+                  method.isActive ? Icons.toggle_on_rounded : Icons.toggle_off_rounded,
+                  size: 20,
+                  color: method.isActive ? AppColors.statusOnline : Colors.grey,
+                ),
+                label: Text(
+                  method.isActive ? 'تعطيل' : 'تفعيل',
+                  style: GoogleFonts.cairo(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: method.isActive ? Colors.red.shade700 : AppColors.statusOnline,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => _deletePaymentMethod(method),
+                icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.statusOffline),
+                label: Text('حذف / أرشفة', style: GoogleFonts.cairo(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.statusOffline)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateOrEditPaymentMethodDialog([ManualPaymentMethodModel? methodToEdit]) {
+    final isEditing = methodToEdit != null;
+    final providerCtrl = TextEditingController(text: methodToEdit?.providerName ?? '');
+    final nameCtrl = TextEditingController(text: methodToEdit?.accountName ?? '');
+    final numberCtrl = TextEditingController(text: methodToEdit?.accountNumber ?? '');
+    final ibanCtrl = TextEditingController(text: methodToEdit?.beneficiaryName ?? '');
+    final instructionsCtrl = TextEditingController(text: methodToEdit?.instructions ?? '');
+    final currencyCtrl = TextEditingController(text: methodToEdit?.currency ?? 'SDG');
+    bool isActive = methodToEdit?.isActive ?? true;
+    bool isSaving = false;
+    String? formError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: AppColors.pageBg,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              isEditing ? 'تعديل وسيلة الدفع' : 'إضافة وسيلة دفع جديدة',
+              style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 17),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (formError != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.statusOffline.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        formError!,
+                        style: GoogleFonts.cairo(fontSize: 12, color: AppColors.statusOffline, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  TextField(
+                    controller: providerCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'اسم البنك أو المحفظة *',
+                      hintText: 'مثال: بنكك (بنك الخرطوم)، فوري، فيصل',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'اسم صاحب الحساب *',
+                      hintText: 'الاسم الكامل كما يظهر في الحساب',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: numberCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'رقم الحساب أو المحفظة *',
+                      hintText: 'مثال: 1234567',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: currencyCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'العملة',
+                            hintText: 'SDG',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: ibanCtrl,
+                          decoration: InputDecoration(
+                            labelText: 'الآيبان / المستفيد',
+                            labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          style: GoogleFonts.cairo(fontSize: 13.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: instructionsCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'تعليمات التحويل للعميل',
+                      hintText: 'مثال: يرجى كتابة اسم الشبكة في ملاحظة التحويل وإرفاق الإشعار',
+                      labelStyle: GoogleFonts.cairo(color: AppColors.textMuted),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    style: GoogleFonts.cairo(fontSize: 13.5),
+                  ),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    title: Text('إتاحة الوسيلة للعملاء', style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w600)),
+                    value: isActive,
+                    activeTrackColor: AppColors.heroGradientStart,
+                    onChanged: (val) => setDialogState(() => isActive = val),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.heroGradientStart,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final provider = providerCtrl.text.trim();
+                        final accountName = nameCtrl.text.trim();
+                        final accountNumber = numberCtrl.text.trim();
+
+                        if (provider.isEmpty || accountName.isEmpty || accountNumber.isEmpty) {
+                          setDialogState(() => formError = 'يرجى ملء جميع الحقول المطلوبة (*)');
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isSaving = true;
+                          formError = null;
+                        });
+
+                        Map<String, dynamic> res;
+                        if (isEditing) {
+                          res = await ApiClient.updateAdminPaymentMethod(
+                            methodToEdit.id,
+                            providerName: provider,
+                            accountName: accountName,
+                            accountNumber: accountNumber,
+                            currency: currencyCtrl.text.trim().isNotEmpty ? currencyCtrl.text.trim() : 'SDG',
+                            iban: ibanCtrl.text.trim().isNotEmpty ? ibanCtrl.text.trim() : null,
+                            instructions: instructionsCtrl.text.trim().isNotEmpty ? instructionsCtrl.text.trim() : null,
+                            isActive: isActive,
+                          );
+                        } else {
+                          res = await ApiClient.createAdminPaymentMethod(
+                            providerName: provider,
+                            accountName: accountName,
+                            accountNumber: accountNumber,
+                            currency: currencyCtrl.text.trim().isNotEmpty ? currencyCtrl.text.trim() : 'SDG',
+                            iban: ibanCtrl.text.trim().isNotEmpty ? ibanCtrl.text.trim() : null,
+                            instructions: instructionsCtrl.text.trim().isNotEmpty ? instructionsCtrl.text.trim() : null,
+                            isActive: isActive,
+                          );
+                        }
+
+                        if (!mounted) return;
+                        setDialogState(() => isSaving = false);
+
+                        if (res['success'] == true) {
+                          if (dialogCtx.mounted) {
+                            Navigator.pop(dialogCtx);
+                          }
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res['message'] as String? ?? 'تم حفظ وسيلة الدفع بنجاح', style: GoogleFonts.cairo()),
+                              backgroundColor: AppColors.statusOnline,
+                            ),
+                          );
+                          _loadPaymentMethods();
+                        } else {
+                          setDialogState(() => formError = res['errorMessage'] as String? ?? 'فشلت العملية');
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Text('حفظ', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _togglePaymentMethodActive(ManualPaymentMethodModel method) async {
+    final res = await ApiClient.toggleAdminPaymentMethodActive(method.id);
+    if (!mounted) return;
+
+    if (res['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] as String? ?? 'تم تغيير حالة وسيلة الدفع بنجاح', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOnline,
+        ),
+      );
+      _loadPaymentMethods();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['errorMessage'] as String? ?? 'تعذر تغيير حالة وسيلة الدفع', style: GoogleFonts.cairo()),
+          backgroundColor: AppColors.statusOffline,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deletePaymentMethod(ManualPaymentMethodModel method) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: AppColors.pageBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text('تأكيد حذف أو تعطيل وسيلة الدفع', style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16)),
+          content: Text(
+            'هل أنت متأكد من رغبتك في حذف وسيلة الدفع "${method.providerName}"؟\n\n'
+            'ملاحظة أمان: في حال وجود طلبات اشتراك سابقة مرتبطة بهذه الوسيلة، سيتم تعطيلها تلقائياً بدلاً من حذفها لحماية سلامة بيانات السجلات.',
+            style: GoogleFonts.cairo(fontSize: 13, height: 1.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('إلغاء', style: GoogleFonts.cairo(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.statusOffline,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('تأكيد', style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final res = await ApiClient.deleteAdminPaymentMethod(method.id);
+      if (!mounted) return;
+
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] as String? ?? 'تمت العملية بنجاح', style: GoogleFonts.cairo(fontWeight: FontWeight.w700)),
+            backgroundColor: AppColors.statusOnline,
+          ),
+        );
+        _loadPaymentMethods();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['errorMessage'] as String? ?? 'فشل تنفيذ العملية', style: GoogleFonts.cairo()),
+            backgroundColor: AppColors.statusOffline,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildCodesTab() {
