@@ -214,15 +214,25 @@ class SubscriptionRequestModel {
     }
   }
 
+  /// Formats price cleanly without trailing .0 (e.g. 50 instead of 50.0)
+  String get formattedPrice {
+    if (price % 1 == 0) {
+      return price.toInt().toString();
+    }
+    return price.toString();
+  }
+
   factory SubscriptionRequestModel.fromJson(Map<String, dynamic> json) {
     final planData = json['plan'] is Map ? json['plan'] as Map<String, dynamic> : null;
-    final planName = (json['planName'] ?? planData?['name']) as String? ?? 'باقة تجارية';
-    final priceNum = json['price'] ?? planData?['price'];
-    final price = priceNum is num
-        ? priceNum.toDouble()
-        : double.tryParse(priceNum?.toString() ?? '0') ?? 0.0;
-    final currency = (json['currency'] ?? planData?['currency']) as String? ?? 'SDG';
-    final durationNum = json['durationDays'] ?? planData?['durationDays'];
+    final planName = planData?['name'] as String? ??
+        json['planName'] as String? ??
+        'باقة اشتراك';
+    final priceRaw = json['priceSnapshot'] ?? json['price'] ?? planData?['price'] ?? 0;
+    final price = priceRaw is num
+        ? priceRaw.toDouble()
+        : double.tryParse(priceRaw?.toString() ?? '0') ?? 0.0;
+    final currency = (json['currencySnapshot'] ?? json['currency'] ?? planData?['currency']) as String? ?? 'USD';
+    final durationNum = json['durationDaysSnapshot'] ?? json['durationDays'] ?? planData?['durationDays'];
     final durationDays = durationNum is int
         ? durationNum
         : int.tryParse(durationNum?.toString() ?? '30') ?? 30;
