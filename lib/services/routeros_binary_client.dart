@@ -477,17 +477,32 @@ class RouterOsBinaryClient {
       '=.proplist=.id',
     ]);
 
-    if (records.isEmpty || records[0]['.id'] == null) {
+    if (records.isEmpty) {
       return false;
     }
 
-    final id = records[0]['.id']!;
-    await executeCommand([
-      '/ip/hotspot/user/remove',
-      '=.id=$id',
-    ]);
+    bool anyRemoved = false;
+    for (final record in records) {
+      final id = record['.id'];
+      if (id != null && id.isNotEmpty) {
+        try {
+          await executeCommand([
+            '/ip/hotspot/user/remove',
+            '=.id=$id',
+          ]);
+          anyRemoved = true;
+        } catch (e) {
+          final err = e.toString().toLowerCase();
+          if (err.contains('no such item')) {
+            // Ignored: item was already removed or does not exist
+          } else {
+            rethrow;
+          }
+        }
+      }
+    }
 
-    return true;
+    return anyRemoved;
   }
 
   /// Parses MikroTik uptime format (e.g. "3w2d1h45m12s" or "1d04:12:30" or "02:14:35") into seconds.

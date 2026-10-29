@@ -136,20 +136,51 @@ class LocalCardSyncService {
       await client.connect();
       await client.login(creds['username']!, creds['password']!);
 
-      // Clean up previous probe user if left behind
+      // 1. Search for probe user via /ip/hotspot/user/print before creation.
+      // If present, delete ONLY the user whose name is exactly _jalsah_probe_test.
       try {
-        await client.removeHotspotUser(probeUsername);
-      } catch (_) {}
+        final existingUsers = await client.getHotspotUsers();
+        final hasLeftoverProbe = existingUsers.any((u) => u['name'] == probeUsername);
+        if (hasLeftoverProbe) {
+          await _safeRemoveProbeUser(client, probeUsername);
+        }
+      } catch (e) {
+        if (e is SocketException || e is TimeoutException) {
+          rethrow;
+        }
+        final errStr = e.toString().toLowerCase();
+        if (!errStr.contains('no such item')) {
+          // If searching or removing failed with non-critical error, continue to creation attempt
+        }
+      }
 
-      // Attempt to create probe user with empty password (validating type a & b protocol handling)
-      await client.createHotspotUser(
-        username: probeUsername,
-        password: '',
-        profile: profile ?? 'default',
-        comment: 'Jalsah:PreflightProbe',
-      );
+      // 2. Attempt to create probe user with empty password (validating type a & b protocol handling).
+      // If "already have user with this name" occurs, it is recoverable:
+      // delete the user and retry creation ONCE, rather than failing permanently.
+      Future<void> attemptCreateProbeUser() async {
+        await client.createHotspotUser(
+          username: probeUsername,
+          password: '',
+          profile: profile ?? 'default',
+          comment: 'Jalsah:PreflightProbe',
+        );
+      }
 
-      // Verify user was created via /ip/hotspot/user/print
+      try {
+        await attemptCreateProbeUser();
+      } catch (e) {
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains('already have user with this name') ||
+            errStr.contains('already have user')) {
+          // Recoverable: remove leftover probe user and retry creation once
+          await _safeRemoveProbeUser(client, probeUsername);
+          await attemptCreateProbeUser();
+        } else {
+          rethrow;
+        }
+      }
+
+      // 3. Verify user was created via /ip/hotspot/user/print
       final existingUsers = await client.getHotspotUsers();
       final exists = existingUsers.any((u) => u['name'] == probeUsername);
 
@@ -157,24 +188,35 @@ class LocalCardSyncService {
         throw Exception('فشل التحقق من إضافة المستخدم التجريبي داخل الراوتر.');
       }
 
-      // Immediately delete the probe user to keep router clean
-      await client.removeHotspotUser(probeUsername);
-
       return {
         'success': true,
         'message': 'تم التحقق من جاهزية الراوتر لإنشاء بطاقات الهوتسبوت بنجاح.',
       };
     } on AuthException catch (e) {
+      var msg = e.message;
+      if (msg.toLowerCase().contains('invalid user name or password')) {
+        msg = 'اسم المستخدم أو كلمة المرور غير صحيحة';
+      }
       return {
         'success': false,
         'errorCode': 'INVALID_CREDENTIALS',
-        'errorMessage': 'فشلت المصادقة مع الراوتر: ${e.message}',
+        'errorMessage': 'فشلت المصادقة مع الراوتر: $msg',
       };
     } on SocketException catch (e) {
+      final detail = e.osError?.message ?? e.message;
+      String arabicDetail = detail;
+      final lower = detail.toLowerCase();
+      if (lower.contains('connection refused')) {
+        arabicDetail = 'تم رفض الاتصال من الراوتر (تأكد من تفعيل خدمة API على المنفذ)';
+      } else if (lower.contains('broken pipe') || lower.contains('connection reset') || lower.contains('connection aborted')) {
+        arabicDetail = 'انقطع الاتصال بالراوتر أثناء الفحص';
+      } else if (lower.contains('network is unreachable') || lower.contains('no route to host')) {
+        arabicDetail = 'تعذر الوصول إلى عنوان الراوتر، تأكد من الاتصال بالشبكة المحلية';
+      }
       return {
         'success': false,
         'errorCode': 'CONNECTION_REFUSED',
-        'errorMessage': 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): ${e.osError?.message ?? e.message}',
+        'errorMessage': 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): $arabicDetail',
       };
     } on TimeoutException {
       return {
@@ -183,7 +225,7 @@ class LocalCardSyncService {
         'errorMessage': 'انتهت مهلة استجابة الراوتر (${router.host}:${router.apiPort}). يرجى التأكد من الاتصال بنفس الشبكة.',
       };
     } catch (e) {
-      final errStr = e.toString();
+      final errStr = e.toString().toLowerCase();
       if (errStr.contains('profile') && errStr.contains('not found')) {
         return {
           'success': false,
@@ -194,11 +236,72 @@ class LocalCardSyncService {
       return {
         'success': false,
         'errorCode': 'PROBE_FAILED',
-        'errorMessage': 'فشل الفحص التجريبي للراوتر: $e',
+        'errorMessage': _cleanErrorMessage(e, profile: profile),
       };
     } finally {
-      await client.close();
+      // 4. Always execute deletion in finally even if verification fails or connection dropped,
+      // and ignore "no such item" or connection errors during cleanup.
+      try {
+        await _safeRemoveProbeUser(client, probeUsername);
+      } catch (_) {}
+      try {
+        await client.close();
+      } catch (_) {}
     }
+  }
+
+  /// Safely removes the probe user and ignores "no such item" errors.
+  static Future<void> _safeRemoveProbeUser(
+    RouterOsBinaryClient client,
+    String username,
+  ) async {
+    try {
+      await client.removeHotspotUser(username);
+    } catch (e) {
+      final errStr = e.toString().toLowerCase();
+      if (errStr.contains('no such item')) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Cleans and formats probe error messages into clear, friendly Arabic text
+  /// without exposing raw "Exception:" or "failure:" prefixes.
+  static String _cleanErrorMessage(dynamic error, {String? profile}) {
+    String msg = error.toString().trim();
+    if (msg.startsWith('Exception: ')) {
+      msg = msg.substring(11).trim();
+    } else if (msg.startsWith('Exception:')) {
+      msg = msg.substring(10).trim();
+    }
+    if (msg.startsWith('failure: ')) {
+      msg = msg.substring(9).trim();
+    } else if (msg.startsWith('failure:')) {
+      msg = msg.substring(8).trim();
+    }
+
+    final lower = msg.toLowerCase();
+    if (lower.contains('profile') && lower.contains('not found')) {
+      return 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.';
+    }
+    if (lower.contains('already have user with this name') || lower.contains('already have user')) {
+      return 'المستخدم التجريبي موجود مسبقاً في الراوتر وتعذر تجاوزه.';
+    }
+    if (lower.contains('permission denied') || lower.contains('not enough permissions')) {
+      return 'حساب الدخول للراوتر لا يملك صلاحية إضافة مستخدمين (مطلوب صلاحية write على الأقل).';
+    }
+    if (lower.contains('broken pipe') || lower.contains('connection reset') || lower.contains('connection aborted')) {
+      return 'انقطع الاتصال بالراوتر أثناء إجراء الفحص التجريبي.';
+    }
+    if (lower.contains('cannot remove') || lower.contains('item has been removed')) {
+      return 'تعذر إزالة المستخدم التجريبي من إعدادات الراوتر.';
+    }
+    if (lower.contains('no such item')) {
+      return 'العنصر المطلوب غير موجود في إعدادات الراوتر.';
+    }
+
+    return 'فشل الفحص التجريبي للراوتر: $msg';
   }
 
   /// Syncs an entire batch of cards directly to the local router on device.
