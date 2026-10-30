@@ -69,13 +69,16 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
   Future<bool> login(String username, String password) async => true;
 
   @override
-  Future<List<Map<String, String>>> getHotspotUsers() async {
+  Future<List<Map<String, String>>> getHotspotUsers({String? name}) async {
     if (throwBrokenPipeOnVerify) {
       throw const SocketException('Broken pipe');
     }
     if (simulateMissingUserOnVerify) {
       // Return list without probe user even if created
       return routerUsers.where((u) => u['name'] != '_jalsah_probe_test').toList();
+    }
+    if (name != null && name.isNotEmpty) {
+      return routerUsers.where((u) => u['name'] == name).toList();
     }
     return List.from(routerUsers);
   }
@@ -332,9 +335,13 @@ void main() {
 
       expect(result['success'], isFalse);
       expect(result['errorCode'], equals('TIMEOUT'));
+      expect(result['step'], equals('الاتصال'));
+      expect(result['errorMessage'], contains('خطوة (الاتصال)'));
+      expect(result['errorMessage'], contains('المنفذ 8728'));
+      expect(result['errorMessage'], contains('غير مشفر'));
       expect(
         result['errorMessage'],
-        equals('تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة'),
+        contains('تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة'),
       );
       expect(mockClient.connectAttempts, equals(2)); // Only 1 retry attempted
     });

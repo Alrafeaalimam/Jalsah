@@ -52,7 +52,10 @@ class FakeRouterOsBinaryClient extends RouterOsBinaryClient {
   }
 
   @override
-  Future<List<Map<String, String>>> getHotspotUsers() async {
+  Future<List<Map<String, String>>> getHotspotUsers({String? name}) async {
+    if (name != null && name.isNotEmpty) {
+      return routerUsers.where((u) => u['name'] == name).toList();
+    }
     return List.from(routerUsers);
   }
 

@@ -779,7 +779,7 @@ class MikrotikDiscoveryService {
 
     // 1. If Binary API (port 8728/8729 or explicit RouterOS API)
     if (isExplicitBinary || (port != 80 && port != 443 && port != 8080)) {
-      final useTls = port == 8729 || connectionMethod == 'ROUTEROS_API_SSL';
+      final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
       final binaryClient = RouterOsBinaryClient(
         host: host,
         port: port,
@@ -1041,7 +1041,7 @@ class MikrotikDiscoveryService {
       };
     }
 
-    final useTls = port == 8729 || connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1113,7 +1113,7 @@ class MikrotikDiscoveryService {
       };
     }
 
-    final useTls = port == 8729 || connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1181,7 +1181,7 @@ class MikrotikDiscoveryService {
       );
     }
 
-    final useTls = port == 8729 || connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1235,7 +1235,7 @@ class MikrotikDiscoveryService {
       );
     }
 
-    final useTls = port == 8729 || connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
