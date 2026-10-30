@@ -29,8 +29,10 @@ class RouterOsBinaryClient {
   });
 
   /// Connects to the MikroTik router via standard socket or secure TLS socket.
+  /// Port 8728 strictly indicates unencrypted API; TLS is never used with port 8728.
   Future<void> connect() async {
-    if (useTls || port == 8729) {
+    final effectiveUseTls = port != 8728 && (useTls || port == 8729);
+    if (effectiveUseTls) {
       final securityContext = SecurityContext(withTrustedRoots: true);
       _socket = await SecureSocket.connect(
         host,
@@ -358,16 +360,20 @@ class RouterOsBinaryClient {
       'cpuLoad': cpuLoad,
       'uptimeSeconds': uptimeSeconds,
       'isDirectLocal': true,
-      'protocol': useTls || port == 8729 ? 'ROUTEROS_API_SSL' : 'ROUTEROS_API_PLAIN',
+      'protocol': (port != 8728 && (useTls || port == 8729)) ? 'ROUTEROS_API_SSL' : 'ROUTEROS_API_PLAIN',
     };
   }
 
   /// Retrieves live HotSpot users directly from the router (/ip/hotspot/user/print).
-  Future<List<Map<String, dynamic>>> getHotspotUsers() async {
-    final records = await executeCommand([
-      '/ip/hotspot/user/print',
-      '=.proplist=.id,name,password,profile,uptime,bytes-in,bytes-out,disabled,comment',
-    ]);
+  /// If [name] is provided, queries RouterOS with `?name=...` to avoid
+  /// dumping large user databases during probes or specific lookups.
+  Future<List<Map<String, dynamic>>> getHotspotUsers({String? name}) async {
+    final words = ['/ip/hotspot/user/print'];
+    if (name != null && name.isNotEmpty) {
+      words.add('?name=$name');
+    }
+    words.add('=.proplist=.id,name,password,profile,uptime,bytes-in,bytes-out,disabled,comment');
+    final records = await executeCommand(words);
 
     return records.map((r) => {
       'id': r['.id'] ?? '',

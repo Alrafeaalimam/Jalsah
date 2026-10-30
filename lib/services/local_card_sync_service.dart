@@ -123,8 +123,11 @@ class LocalCardSyncService {
     }
 
     // Probe with at most 1 retry upon timeout before failing
+    String lastFailedStep = 'الاتصال';
     for (int attempt = 1; attempt <= 2; attempt++) {
-      final useTls = router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL';
+      // Port 8728 is unencrypted RouterOS API: never use TLS with it.
+      final useTls = router.apiPort != 8728 &&
+          (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
       final client = _createClient(
         host: router.host,
         port: router.apiPort,
@@ -133,18 +136,30 @@ class LocalCardSyncService {
       );
 
       const probeUsername = '_jalsah_probe_test';
+      String currentStep = 'الاتصال';
 
       try {
+        lastFailedStep = 'الاتصال';
+        currentStep = 'الاتصال';
         await client.connect();
+
+        lastFailedStep = 'تسجيل الدخول';
+        currentStep = 'تسجيل الدخول';
         await client.login(creds['username']!, creds['password']!);
 
-        // 1. Search for probe user via /ip/hotspot/user/print before creation.
+        // 1. Search for probe user via /ip/hotspot/user/print with specific name filter before creation.
         // If present, delete ONLY the user whose name is exactly _jalsah_probe_test.
+        lastFailedStep = 'قراءة المستخدمين';
+        currentStep = 'قراءة المستخدمين';
         try {
-          final existingUsers = await client.getHotspotUsers();
+          final existingUsers = await client.getHotspotUsers(name: probeUsername);
           final hasLeftoverProbe = existingUsers.any((u) => u['name'] == probeUsername);
           if (hasLeftoverProbe) {
+            lastFailedStep = 'الحذف';
+            currentStep = 'الحذف';
             await _safeRemoveProbeUser(client, probeUsername);
+            lastFailedStep = 'قراءة المستخدمين';
+            currentStep = 'قراءة المستخدمين';
           }
         } catch (e) {
           if (e is SocketException || e is TimeoutException) {
@@ -168,6 +183,8 @@ class LocalCardSyncService {
           );
         }
 
+        lastFailedStep = 'الإنشاء';
+        currentStep = 'الإنشاء';
         try {
           await attemptCreateProbeUser();
         } catch (e) {
@@ -175,20 +192,31 @@ class LocalCardSyncService {
           if (errStr.contains('already have user with this name') ||
               errStr.contains('already have user')) {
             // Recoverable: remove leftover probe user and retry creation once
+            lastFailedStep = 'الحذف';
+            currentStep = 'الحذف';
             await _safeRemoveProbeUser(client, probeUsername);
+            lastFailedStep = 'الإنشاء';
+            currentStep = 'الإنشاء';
             await attemptCreateProbeUser();
           } else {
             rethrow;
           }
         }
 
-        // 3. Verify user was created via /ip/hotspot/user/print
-        final existingUsers = await client.getHotspotUsers();
+        // 3. Verify user was created via /ip/hotspot/user/print with name filter
+        lastFailedStep = 'التحقق';
+        currentStep = 'التحقق';
+        final existingUsers = await client.getHotspotUsers(name: probeUsername);
         final exists = existingUsers.any((u) => u['name'] == probeUsername);
 
         if (!exists) {
           throw Exception('فشل التحقق من إضافة المستخدم التجريبي داخل الراوتر.');
         }
+
+        // 4. Safely delete the probe user upon successful verification
+        lastFailedStep = 'الحذف';
+        currentStep = 'الحذف';
+        await _safeRemoveProbeUser(client, probeUsername);
 
         return {
           'success': true,
@@ -202,7 +230,13 @@ class LocalCardSyncService {
         return {
           'success': false,
           'errorCode': 'TIMEOUT',
-          'errorMessage': 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+          'step': currentStep,
+          'errorMessage': _buildDiagnosticErrorMessage(
+            step: currentStep,
+            port: router.apiPort,
+            useTls: useTls,
+            detail: 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+          ),
         };
       } on AuthException catch (e) {
         var msg = e.message;
@@ -212,7 +246,13 @@ class LocalCardSyncService {
         return {
           'success': false,
           'errorCode': 'INVALID_CREDENTIALS',
-          'errorMessage': 'فشلت المصادقة مع الراوتر: $msg',
+          'step': currentStep,
+          'errorMessage': _buildDiagnosticErrorMessage(
+            step: currentStep,
+            port: router.apiPort,
+            useTls: useTls,
+            detail: 'فشلت المصادقة مع الراوتر: $msg',
+          ),
         };
       } on SocketException catch (e) {
         final detail = e.osError?.message ?? e.message;
@@ -228,7 +268,13 @@ class LocalCardSyncService {
         return {
           'success': false,
           'errorCode': 'CONNECTION_REFUSED',
-          'errorMessage': 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): $arabicDetail',
+          'step': currentStep,
+          'errorMessage': _buildDiagnosticErrorMessage(
+            step: currentStep,
+            port: router.apiPort,
+            useTls: useTls,
+            detail: 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): $arabicDetail',
+          ),
         };
       } catch (e) {
         final errStr = e.toString().toLowerCase();
@@ -236,16 +282,28 @@ class LocalCardSyncService {
           return {
             'success': false,
             'errorCode': 'PROFILE_NOT_FOUND',
-            'errorMessage': 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.',
+            'step': currentStep,
+            'errorMessage': _buildDiagnosticErrorMessage(
+              step: currentStep,
+              port: router.apiPort,
+              useTls: useTls,
+              detail: 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.',
+            ),
           };
         }
         return {
           'success': false,
           'errorCode': 'PROBE_FAILED',
-          'errorMessage': _cleanErrorMessage(e, profile: profile),
+          'step': currentStep,
+          'errorMessage': _buildDiagnosticErrorMessage(
+            step: currentStep,
+            port: router.apiPort,
+            useTls: useTls,
+            detail: _cleanErrorMessage(e, profile: profile),
+          ),
         };
       } finally {
-        // 4. Always execute deletion in finally even if verification fails or connection dropped,
+        // 5. Always execute deletion in finally even if verification fails or connection dropped,
         // and ignore "no such item" or connection errors during cleanup.
         try {
           await _safeRemoveProbeUser(client, probeUsername);
@@ -256,10 +314,18 @@ class LocalCardSyncService {
       }
     }
 
+    final finalUseTls = router.apiPort != 8728 &&
+        (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
     return {
       'success': false,
       'errorCode': 'TIMEOUT',
-      'errorMessage': 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+      'step': lastFailedStep,
+      'errorMessage': _buildDiagnosticErrorMessage(
+        step: lastFailedStep,
+        port: router.apiPort,
+        useTls: finalUseTls,
+        detail: 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+      ),
     };
   }
 
@@ -314,7 +380,27 @@ class LocalCardSyncService {
       return 'العنصر المطلوب غير موجود في إعدادات الراوتر.';
     }
 
-    return 'فشل الفحص التجريبي للراوتر: $msg';
+    return msg;
+  }
+
+  /// Formats diagnostic error messages indicating the failing step, port,
+  /// connection type (مشفر / غير مشفر), and detailed reason without passwords.
+  static String _buildDiagnosticErrorMessage({
+    required String step,
+    required int port,
+    required bool useTls,
+    required String detail,
+  }) {
+    final connType = useTls ? 'مشفر' : 'غير مشفر';
+    final sanitizedDetail = _sanitizeErrorMessage(detail);
+    return 'فشل الفحص المسبق عند خطوة ($step) عبر المنفذ $port ($connType): $sanitizedDetail';
+  }
+
+  /// Strips any passwords or raw credentials from error strings.
+  static String _sanitizeErrorMessage(String message) {
+    return message
+        .replaceAll(RegExp(r'=password=[^\s,;)]+', caseSensitive: false), '=password=***')
+        .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***');
   }
 
   /// Syncs an entire batch of cards directly to the local router on device.
@@ -378,7 +464,8 @@ class LocalCardSyncService {
       );
     }
 
-    final useTls = router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = router.apiPort != 8728 &&
+        (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
     final client = _createClient(
       host: router.host,
       port: router.apiPort,
@@ -543,7 +630,8 @@ class LocalCardSyncService {
       );
     }
 
-    final useTls = router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL';
+    final useTls = router.apiPort != 8728 &&
+        (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
     final client = _createClient(
       host: router.host,
       port: router.apiPort,
