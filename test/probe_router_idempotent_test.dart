@@ -69,7 +69,7 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
   Future<bool> login(String username, String password) async => true;
 
   @override
-  Future<List<Map<String, String>>> getHotspotUsers({String? name}) async {
+  Future<List<Map<String, String>>> getHotspotUsers({String? name, int? limit}) async {
     if (throwBrokenPipeOnVerify) {
       throw const SocketException('Broken pipe');
     }
@@ -77,10 +77,14 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
       // Return list without probe user even if created
       return routerUsers.where((u) => u['name'] != '_jalsah_probe_test').toList();
     }
+    List<Map<String, String>> res = routerUsers;
     if (name != null && name.isNotEmpty) {
-      return routerUsers.where((u) => u['name'] == name).toList();
+      res = res.where((u) => u['name'] == name).toList();
     }
-    return List.from(routerUsers);
+    if (limit != null && limit > 0) {
+      return res.take(limit).toList();
+    }
+    return List.from(res);
   }
 
   @override

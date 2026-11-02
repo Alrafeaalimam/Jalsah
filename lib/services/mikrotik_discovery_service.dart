@@ -1021,16 +1021,30 @@ class MikrotikDiscoveryService {
     required String username,
     required String password,
     String? connectionMethod,
+    String? searchName,
+    int limit = 200,
     Duration timeout = const Duration(seconds: 8),
   }) async {
     if (hotspotUsersDirectTester != null) {
-      return await hotspotUsersDirectTester!(
-        host: host,
-        port: port,
-        username: username,
-        password: password,
-        connectionMethod: connectionMethod,
-      );
+      try {
+        return await (hotspotUsersDirectTester as dynamic)(
+          host: host,
+          port: port,
+          username: username,
+          password: password,
+          connectionMethod: connectionMethod,
+          searchName: searchName,
+          limit: limit,
+        );
+      } catch (_) {
+        return await (hotspotUsersDirectTester as dynamic)(
+          host: host,
+          port: port,
+          username: username,
+          password: password,
+          connectionMethod: connectionMethod,
+        );
+      }
     }
 
     if (directConnectionTester != null) {
@@ -1042,6 +1056,7 @@ class MikrotikDiscoveryService {
     }
 
     final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
+    final connType = useTls ? 'مشفر' : 'غير مشفر';
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1052,34 +1067,34 @@ class MikrotikDiscoveryService {
     try {
       await binaryClient.connect();
       await binaryClient.login(username, password);
-      final users = await binaryClient.getHotspotUsers();
+      final users = await binaryClient.getHotspotUsers(name: searchName, limit: limit);
       return {
         'success': true,
         'data': users,
       };
-    } on AuthException catch (e) {
+    } on AuthException catch (_) {
       return {
         'success': false,
         'errorCode': 'INVALID_CREDENTIALS',
-        'errorMessage': e.message,
+        'errorMessage': 'فشل خطوة (المصادقة) أثناء جلب مستخدمي الهوتسبوت: اسم المستخدم أو كلمة المرور غير صحيحة',
       };
-    } on SocketException catch (e) {
+    } on SocketException catch (_) {
       return {
         'success': false,
         'errorCode': 'PORT_CLOSED',
-        'errorMessage': 'تعذر الاتصال بالراوتر لجلب المستخدمين: ${e.message}',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب مستخدمي الهوتسبوت عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
     } on TimeoutException {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'انتهت مهلة استجابة الراوتر أثناء جلب المستخدمين',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب مستخدمي الهوتسبوت عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
       };
     } catch (e) {
       return {
         'success': false,
         'errorCode': 'HOTSPOT_USERS_ERROR',
-        'errorMessage': 'فشل جلب مستخدمي الهوتسبوت: $e',
+        'errorMessage': 'فشل خطوة (جلب مستخدمي الهوتسبوت): تعذر قراءة المستخدمين من الراوتر المحلي',
       };
     } finally {
       await binaryClient.close();
@@ -1093,6 +1108,7 @@ class MikrotikDiscoveryService {
     required String username,
     required String password,
     String? connectionMethod,
+    int limit = 200,
     Duration timeout = const Duration(seconds: 8),
   }) async {
     if (hotspotSessionsDirectTester != null) {
@@ -1114,6 +1130,7 @@ class MikrotikDiscoveryService {
     }
 
     final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
+    final connType = useTls ? 'مشفر' : 'غير مشفر';
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1124,34 +1141,34 @@ class MikrotikDiscoveryService {
     try {
       await binaryClient.connect();
       await binaryClient.login(username, password);
-      final sessions = await binaryClient.getHotspotActiveSessions();
+      final sessions = await binaryClient.getHotspotActiveSessions(limit: limit);
       return {
         'success': true,
         'data': sessions,
       };
-    } on AuthException catch (e) {
+    } on AuthException catch (_) {
       return {
         'success': false,
         'errorCode': 'INVALID_CREDENTIALS',
-        'errorMessage': e.message,
+        'errorMessage': 'فشل خطوة (المصادقة) أثناء جلب الجلسات النشطة: اسم المستخدم أو كلمة المرور غير صحيحة',
       };
-    } on SocketException catch (e) {
+    } on SocketException catch (_) {
       return {
         'success': false,
         'errorCode': 'PORT_CLOSED',
-        'errorMessage': 'تعذر الاتصال بالراوتر لجلب الجلسات: ${e.message}',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب الجلسات النشطة عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
     } on TimeoutException {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'انتهت مهلة استجابة الراوتر أثناء جلب الجلسات النشطة',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب الجلسات النشطة عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
       };
     } catch (e) {
       return {
         'success': false,
         'errorCode': 'HOTSPOT_SESSIONS_ERROR',
-        'errorMessage': 'فشل جلب الجلسات النشطة: $e',
+        'errorMessage': 'فشل خطوة (جلب الجلسات النشطة): تعذر قراءة الجلسات من الراوتر المحلي',
       };
     } finally {
       await binaryClient.close();
@@ -1182,6 +1199,7 @@ class MikrotikDiscoveryService {
     }
 
     final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
+    final connType = useTls ? 'مشفر' : 'غير مشفر';
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1197,17 +1215,31 @@ class MikrotikDiscoveryService {
         'success': true,
         'data': {'username': targetUsername, 'isEnabled': isEnabled},
       };
-    } on AuthException catch (e) {
+    } on AuthException catch (_) {
       return {
         'success': false,
         'errorCode': 'INVALID_CREDENTIALS',
-        'errorMessage': e.message,
+        'errorMessage': 'فشل خطوة (المصادقة) أثناء تعديل حالة المستخدم: اسم المستخدم أو كلمة المرور غير صحيحة',
+      };
+    } on SocketException catch (_) {
+      return {
+        'success': false,
+        'errorCode': 'PORT_CLOSED',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء تعديل حالة المستخدم عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
+      };
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء تعديل حالة المستخدم عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
       };
     } catch (e) {
+      String clean = e.toString();
+      if (clean.startsWith('Exception: ')) clean = clean.substring(11);
       return {
         'success': false,
         'errorCode': 'TOGGLE_USER_ERROR',
-        'errorMessage': 'فشل تعديل حالة المستخدم على الراوتر: $e',
+        'errorMessage': 'فشل خطوة (تعديل حالة المستخدم): $clean',
       };
     } finally {
       await binaryClient.close();
@@ -1236,6 +1268,7 @@ class MikrotikDiscoveryService {
     }
 
     final useTls = port != 8728 && (port == 8729 || connectionMethod == 'ROUTEROS_API_SSL');
+    final connType = useTls ? 'مشفر' : 'غير مشفر';
     final binaryClient = RouterOsBinaryClient(
       host: host,
       port: port,
@@ -1251,17 +1284,31 @@ class MikrotikDiscoveryService {
         'success': true,
         'data': {'username': targetUsername, 'disconnected': true},
       };
-    } on AuthException catch (e) {
+    } on AuthException catch (_) {
       return {
         'success': false,
         'errorCode': 'INVALID_CREDENTIALS',
-        'errorMessage': e.message,
+        'errorMessage': 'فشل خطوة (المصادقة) أثناء فصل الجلسة: اسم المستخدم أو كلمة المرور غير صحيحة',
+      };
+    } on SocketException catch (_) {
+      return {
+        'success': false,
+        'errorCode': 'PORT_CLOSED',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء فصل الجلسة عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
+      };
+    } on TimeoutException {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء فصل الجلسة عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
       };
     } catch (e) {
+      String clean = e.toString();
+      if (clean.startsWith('Exception: ')) clean = clean.substring(11);
       return {
         'success': false,
         'errorCode': 'DISCONNECT_SESSION_ERROR',
-        'errorMessage': 'فشل فصل الجلسة على الراوتر: $e',
+        'errorMessage': 'فشل خطوة (فصل الجلسة): $clean',
       };
     } finally {
       await binaryClient.close();
