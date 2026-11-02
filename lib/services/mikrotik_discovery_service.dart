@@ -760,7 +760,7 @@ class MikrotikDiscoveryService {
     required String username,
     required String password,
     String? connectionMethod,
-    Duration timeout = const Duration(seconds: 6),
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     if (directConnectionTester != null) {
       return await directConnectionTester!(
@@ -810,11 +810,23 @@ class MikrotikDiscoveryService {
           'errorMessage':
               'تعذر الاتصال بمنفذ RouterOS API ($host:$port): ${e.osError?.message ?? e.message}. تأكد من تفعيل خدمة api في الراوتر (/ip service).',
         };
-      } on TimeoutException {
+      } on TimeoutException catch (e) {
         return {
           'success': false,
           'errorCode': 'TIMEOUT',
-          'errorMessage': 'انتهت مهلة الاتصال بالراوتر ($host:$port). تأكد من اتصال هاتفك بنفس الشبكة.',
+          'errorMessage': 'انتهت مهلة استجابة الراوتر ($host:$port): ${e.message ?? "انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ"}',
+        };
+      } on RouterOsTrapException catch (e) {
+        return {
+          'success': false,
+          'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+          'errorMessage': 'فشل فحص اتصال الراوتر ($host:$port): ${e.message}',
+        };
+      } on FormatException catch (e) {
+        return {
+          'success': false,
+          'errorCode': 'MALFORMED_RESPONSE',
+          'errorMessage': 'فشل فحص اتصال الراوتر ($host:$port): ${e.message}',
         };
       } catch (e) {
         return {
@@ -1023,7 +1035,7 @@ class MikrotikDiscoveryService {
     String? connectionMethod,
     String? searchName,
     int limit = 200,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     if (hotspotUsersDirectTester != null) {
       try {
@@ -1084,11 +1096,23 @@ class MikrotikDiscoveryService {
         'errorCode': 'PORT_CLOSED',
         'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب مستخدمي الهوتسبوت عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب مستخدمي الهوتسبوت عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب مستخدمي الهوتسبوت عبر المنفذ $port ($connType): ${e.message ?? "انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ"}',
+      };
+    } on RouterOsTrapException catch (e) {
+      return {
+        'success': false,
+        'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': 'فشل خطوة (جلب مستخدمي الهوتسبوت): ${e.message}',
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'MALFORMED_RESPONSE',
+        'errorMessage': 'فشل خطوة (جلب مستخدمي الهوتسبوت): ${e.message}',
       };
     } catch (e) {
       return {
@@ -1109,7 +1133,7 @@ class MikrotikDiscoveryService {
     required String password,
     String? connectionMethod,
     int limit = 200,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     if (hotspotSessionsDirectTester != null) {
       return await hotspotSessionsDirectTester!(
@@ -1158,11 +1182,23 @@ class MikrotikDiscoveryService {
         'errorCode': 'PORT_CLOSED',
         'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب الجلسات النشطة عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب الجلسات النشطة عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء جلب الجلسات النشطة عبر المنفذ $port ($connType): ${e.message ?? "انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ"}',
+      };
+    } on RouterOsTrapException catch (e) {
+      return {
+        'success': false,
+        'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': 'فشل خطوة (جلب الجلسات النشطة): ${e.message}',
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'MALFORMED_RESPONSE',
+        'errorMessage': 'فشل خطوة (جلب الجلسات النشطة): ${e.message}',
       };
     } catch (e) {
       return {
@@ -1184,7 +1220,7 @@ class MikrotikDiscoveryService {
     required String targetUsername,
     required bool isEnabled,
     String? connectionMethod,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     if (toggleHotspotUserDirectTester != null) {
       return await toggleHotspotUserDirectTester!(
@@ -1227,11 +1263,23 @@ class MikrotikDiscoveryService {
         'errorCode': 'PORT_CLOSED',
         'errorMessage': 'فشل خطوة (الاتصال) أثناء تعديل حالة المستخدم عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'فشل خطوة (الاتصال) أثناء تعديل حالة المستخدم عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء تعديل حالة المستخدم عبر المنفذ $port ($connType): ${e.message ?? "انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ"}',
+      };
+    } on RouterOsTrapException catch (e) {
+      return {
+        'success': false,
+        'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': 'فشل خطوة (تعديل حالة المستخدم): ${e.message}',
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'MALFORMED_RESPONSE',
+        'errorMessage': 'فشل خطوة (تعديل حالة المستخدم): ${e.message}',
       };
     } catch (e) {
       String clean = e.toString();
@@ -1254,7 +1302,7 @@ class MikrotikDiscoveryService {
     required String password,
     required String targetUsername,
     String? connectionMethod,
-    Duration timeout = const Duration(seconds: 8),
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     if (disconnectHotspotSessionDirectTester != null) {
       return await disconnectHotspotSessionDirectTester!(
@@ -1296,11 +1344,23 @@ class MikrotikDiscoveryService {
         'errorCode': 'PORT_CLOSED',
         'errorMessage': 'فشل خطوة (الاتصال) أثناء فصل الجلسة عبر المنفذ $port ($connType): تعذر الاتصال بالراوتر على الشبكة المحلية',
       };
-    } on TimeoutException {
+    } on TimeoutException catch (e) {
       return {
         'success': false,
         'errorCode': 'TIMEOUT',
-        'errorMessage': 'فشل خطوة (الاتصال) أثناء فصل الجلسة عبر المنفذ $port ($connType): انتهت مهلة استجابة الراوتر',
+        'errorMessage': 'فشل خطوة (الاتصال) أثناء فصل الجلسة عبر المنفذ $port ($connType): ${e.message ?? "انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ"}',
+      };
+    } on RouterOsTrapException catch (e) {
+      return {
+        'success': false,
+        'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': 'فشل خطوة (فصل الجلسة): ${e.message}',
+      };
+    } on FormatException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'MALFORMED_RESPONSE',
+        'errorMessage': 'فشل خطوة (فصل الجلسة): ${e.message}',
       };
     } catch (e) {
       String clean = e.toString();
