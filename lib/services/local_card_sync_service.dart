@@ -82,7 +82,7 @@ class LocalCardSyncService {
     required String host,
     required int port,
     required bool useTls,
-    Duration timeout = const Duration(seconds: 6),
+    Duration timeout = const Duration(seconds: 10),
   }) {
     if (clientFactory != null) {
       return clientFactory!(
@@ -132,7 +132,7 @@ class LocalCardSyncService {
         host: router.host,
         port: router.apiPort,
         useTls: useTls,
-        timeout: const Duration(seconds: 5),
+        timeout: const Duration(seconds: 10),
       );
 
       const probeUsername = '_jalsah_probe_test';
@@ -222,11 +222,17 @@ class LocalCardSyncService {
           'success': true,
           'message': 'تم التحقق من جاهزية الراوتر لإنشاء بطاقات الهوتسبوت بنجاح.',
         };
-      } on TimeoutException {
+      } on TimeoutException catch (e) {
         if (attempt == 1) {
           // Retry once on timeout
           continue;
         }
+        final timeoutDetail = (e.message != null &&
+                (e.message!.contains('انتهت مهلة') ||
+                    e.message!.contains('لا رد') ||
+                    e.message!.contains('انقطاع الرد')))
+            ? e.message!
+            : 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة';
         return {
           'success': false,
           'errorCode': 'TIMEOUT',
@@ -235,7 +241,7 @@ class LocalCardSyncService {
             step: currentStep,
             port: router.apiPort,
             useTls: useTls,
-            detail: 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+            detail: timeoutDetail,
           ),
         };
       } on AuthException catch (e) {
@@ -324,7 +330,7 @@ class LocalCardSyncService {
         step: lastFailedStep,
         port: router.apiPort,
         useTls: finalUseTls,
-        detail: 'تعذر الاتصال بالراوتر، تأكد أن الهاتف على نفس شبكة الراوتر وأن خدمة API شغالة',
+        detail: 'انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ: لا رد (لم يتم استلام أي جملة)',
       ),
     };
   }
@@ -348,6 +354,16 @@ class LocalCardSyncService {
   /// Cleans and formats probe error messages into clear, friendly Arabic text
   /// without exposing raw "Exception:" or "failure:" prefixes.
   static String _cleanErrorMessage(dynamic error, {String? profile}) {
+    if (error is RouterOsTrapException) {
+      return error.message;
+    }
+    if (error is RouterOsFatalException) {
+      return error.message;
+    }
+    if (error is FormatException) {
+      return error.message;
+    }
+
     String msg = error.toString().trim();
     if (msg.startsWith('Exception: ')) {
       msg = msg.substring(11).trim();

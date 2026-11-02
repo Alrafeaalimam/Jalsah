@@ -10,6 +10,27 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+
+class RouterOsTrapException implements Exception {
+  final String message;
+  final bool isPermission;
+  final String? category;
+
+  RouterOsTrapException(this.message, {this.isPermission = false, this.category});
+
+  @override
+  String toString() => message;
+}
+
+class RouterOsFatalException implements Exception {
+  final String message;
+
+  RouterOsFatalException(this.message);
+
+  @override
+  String toString() => message;
+}
 
 class RouterOsBinaryClient {
   final String host;
@@ -18,19 +39,26 @@ class RouterOsBinaryClient {
   final bool useTls;
 
   Socket? _socket;
-  final StreamController<List<int>> _byteStream = StreamController<List<int>>.broadcast();
   StreamSubscription<List<int>>? _socketSubscription;
+  final List<int> _incomingBuffer = [];
+  Completer<List<String>>? _pendingSentenceCompleter;
+  Timer? _sentenceTimer;
+  int _commandSentencesReceived = 0;
+  bool _isSocketClosed = false;
 
   RouterOsBinaryClient({
     required this.host,
     this.port = 8728,
-    this.timeout = const Duration(seconds: 6),
+    this.timeout = const Duration(seconds: 10),
     this.useTls = false,
   });
 
   /// Connects to the MikroTik router via standard socket or secure TLS socket.
   /// Port 8728 strictly indicates unencrypted API; TLS is never used with port 8728.
   Future<void> connect() async {
+    _incomingBuffer.clear();
+    _isSocketClosed = false;
+    _commandSentencesReceived = 0;
     final effectiveUseTls = port != 8728 && (useTls || port == 8729);
     if (effectiveUseTls) {
       final securityContext = SecurityContext(withTrustedRoots: true);
@@ -46,21 +74,31 @@ class RouterOsBinaryClient {
     }
 
     _socketSubscription = _socket!.listen(
-      (data) => _byteStream.add(data),
-      onError: (err) => _byteStream.addError(err),
-      onDone: () => _byteStream.close(),
+      _onIncomingData,
+      onError: _onSocketError,
+      onDone: _onSocketDone,
       cancelOnError: true,
     );
   }
 
   /// Closes the socket cleanly.
   Future<void> close() async {
+    _sentenceTimer?.cancel();
+    _sentenceTimer = null;
+    if (_pendingSentenceCompleter != null && !_pendingSentenceCompleter!.isCompleted) {
+      _pendingSentenceCompleter!.completeError(
+        const SocketException('تم إغلاق الاتصال بالراوتر'),
+      );
+      _pendingSentenceCompleter = null;
+    }
     try {
       await _socketSubscription?.cancel();
       await _socket?.flush();
       await _socket?.close();
       _socket?.destroy();
     } catch (_) {}
+    _incomingBuffer.clear();
+    _isSocketClosed = true;
   }
 
   /// Encodes length according to MikroTik RouterOS binary protocol specification.
@@ -106,114 +144,178 @@ class RouterOsBinaryClient {
     await _socket!.flush();
   }
 
-  /// Reads one sentence from the socket byte stream.
-  Future<List<String>> readSentence() async {
+  void _onIncomingData(List<int> chunk) {
+    _incomingBuffer.addAll(chunk);
+    _checkPendingSentence();
+  }
+
+  void _checkPendingSentence() {
+    if (_pendingSentenceCompleter == null || _pendingSentenceCompleter!.isCompleted) {
+      return;
+    }
+
+    try {
+      final sentence = _extractSentenceFromBuffer();
+      if (sentence != null) {
+        _sentenceTimer?.cancel();
+        _sentenceTimer = null;
+        _commandSentencesReceived++;
+        final completer = _pendingSentenceCompleter!;
+        _pendingSentenceCompleter = null;
+        completer.complete(sentence);
+      }
+    } catch (e) {
+      _sentenceTimer?.cancel();
+      _sentenceTimer = null;
+      final completer = _pendingSentenceCompleter;
+      _pendingSentenceCompleter = null;
+      completer?.completeError(e);
+    }
+  }
+
+  void _onSocketError(Object err) {
+    _sentenceTimer?.cancel();
+    _sentenceTimer = null;
+    final completer = _pendingSentenceCompleter;
+    _pendingSentenceCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(err);
+    }
+  }
+
+  void _onSocketDone() {
+    _isSocketClosed = true;
+    _sentenceTimer?.cancel();
+    _sentenceTimer = null;
+    final completer = _pendingSentenceCompleter;
+    _pendingSentenceCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(
+        const SocketException('انقطع الاتصال بالراوتر أثناء قراءة الرد'),
+      );
+    }
+  }
+
+  @visibleForTesting
+  void addIncomingDataForTesting(List<int> chunk) {
+    _onIncomingData(chunk);
+  }
+
+  /// Extracts one complete sentence from [_incomingBuffer] if available.
+  /// Returns null if more bytes are required.
+  List<String>? _extractSentenceFromBuffer() {
+    int offset = 0;
     final List<String> words = [];
 
-    final buffer = <int>[];
+    while (offset < _incomingBuffer.length) {
+      final firstByte = _incomingBuffer[offset];
+      if (firstByte == 0x00) {
+        // Sentence terminator (empty word)
+        offset++;
+        _incomingBuffer.removeRange(0, offset);
+        return words;
+      }
+
+      int length = 0;
+      int lengthBytesCount = 0;
+
+      if ((firstByte & 0x80) == 0x00) {
+        length = firstByte;
+        lengthBytesCount = 1;
+      } else if ((firstByte & 0xC0) == 0x80) {
+        if (_incomingBuffer.length < offset + 2) return null;
+        length = ((firstByte & 0x3F) << 8) | _incomingBuffer[offset + 1];
+        lengthBytesCount = 2;
+      } else if ((firstByte & 0xE0) == 0xC0) {
+        if (_incomingBuffer.length < offset + 3) return null;
+        length = ((firstByte & 0x1F) << 16) |
+            (_incomingBuffer[offset + 1] << 8) |
+            _incomingBuffer[offset + 2];
+        lengthBytesCount = 3;
+      } else if ((firstByte & 0xF0) == 0xE0) {
+        if (_incomingBuffer.length < offset + 4) return null;
+        length = ((firstByte & 0x0F) << 24) |
+            (_incomingBuffer[offset + 1] << 16) |
+            (_incomingBuffer[offset + 2] << 8) |
+            _incomingBuffer[offset + 3];
+        lengthBytesCount = 4;
+      } else if ((firstByte & 0xF8) == 0xF0) {
+        if (_incomingBuffer.length < offset + 5) return null;
+        length = (_incomingBuffer[offset + 1] << 24) |
+            (_incomingBuffer[offset + 2] << 16) |
+            (_incomingBuffer[offset + 3] << 8) |
+            _incomingBuffer[offset + 4];
+        lengthBytesCount = 5;
+      } else {
+        throw FormatException(
+          'صيغة طول الكلمة في رد الراوتر غير صالحة (0x${firstByte.toRadixString(16)})',
+        );
+      }
+
+      if (_incomingBuffer.length < offset + lengthBytesCount + length) {
+        // Word is not fully in buffer yet
+        return null;
+      }
+
+      final wordBytes = _incomingBuffer.sublist(
+        offset + lengthBytesCount,
+        offset + lengthBytesCount + length,
+      );
+      offset += lengthBytesCount + length;
+      words.add(utf8.decode(wordBytes, allowMalformed: true));
+    }
+
+    return null;
+  }
+
+  /// Reads one sentence from the socket byte stream.
+  Future<List<String>> readSentence() async {
+    // 1. If buffer already has a complete sentence, return it immediately without waiting.
+    final cachedSentence = _extractSentenceFromBuffer();
+    if (cachedSentence != null) {
+      _commandSentencesReceived++;
+      return cachedSentence;
+    }
+
+    if (_isSocketClosed) {
+      if (_incomingBuffer.isEmpty) {
+        throw const SocketException('تم إغلاق الاتصال من راوتر MikroTik');
+      }
+      throw const FormatException('تم إغلاق الاتصال قبل اكتمال استلام الجملة من الراوتر');
+    }
+
+    // 2. Wait for incoming socket data.
     final completer = Completer<List<String>>();
+    _pendingSentenceCompleter = completer;
 
-    StreamSubscription<List<int>>? sub;
-
-    Timer? timer;
-    timer = Timer(timeout, () {
+    final currentTimeout = timeout;
+    _sentenceTimer = Timer(currentTimeout, () {
       if (!completer.isCompleted) {
-        sub?.cancel();
+        _pendingSentenceCompleter = null;
+        final waitSec = currentTimeout.inSeconds;
+        final statusDesc = _commandSentencesReceived == 0
+            ? 'لا رد (لم يتم استلام أي جملة)'
+            : 'انقطاع الرد (تم استلام $_commandSentencesReceived جملة قبل التوقف)';
         completer.completeError(
-          TimeoutException('انتهت مهلة قراءة الرد من راوتر MikroTik ($timeout)'),
+          TimeoutException(
+            'انتهت مهلة استجابة الراوتر بعد انتظار $waitSec ثوانٍ: $statusDesc',
+          ),
         );
       }
     });
-
-    void processBuffer() {
-      while (true) {
-        if (buffer.isEmpty) break;
-
-        // Read length
-        int firstByte = buffer[0];
-        if (firstByte == 0x00) {
-          // End of sentence
-          buffer.removeAt(0);
-          timer?.cancel();
-          sub?.cancel();
-          if (!completer.isCompleted) {
-            completer.complete(words);
-          }
-          return;
-        }
-
-        int length = 0;
-        int lengthBytesCount = 0;
-
-        if ((firstByte & 0x80) == 0x00) {
-          length = firstByte;
-          lengthBytesCount = 1;
-        } else if ((firstByte & 0xC0) == 0x80) {
-          if (buffer.length < 2) return;
-          length = ((firstByte & 0x3F) << 8) | buffer[1];
-          lengthBytesCount = 2;
-        } else if ((firstByte & 0xE0) == 0xC0) {
-          if (buffer.length < 3) return;
-          length = ((firstByte & 0x1F) << 16) | (buffer[1] << 8) | buffer[2];
-          lengthBytesCount = 3;
-        } else if ((firstByte & 0xF0) == 0xE0) {
-          if (buffer.length < 4) return;
-          length = ((firstByte & 0x0F) << 24) |
-              (buffer[1] << 16) |
-              (buffer[2] << 8) |
-              buffer[3];
-          lengthBytesCount = 4;
-        } else if ((firstByte & 0xF8) == 0xF0) {
-          if (buffer.length < 5) return;
-          length = (buffer[1] << 24) |
-              (buffer[2] << 16) |
-              (buffer[3] << 8) |
-              buffer[4];
-          lengthBytesCount = 5;
-        }
-
-        if (buffer.length < lengthBytesCount + length) {
-          // Need more bytes
-          return;
-        }
-
-        // Extract word
-        final wordBytes = buffer.sublist(
-          lengthBytesCount,
-          lengthBytesCount + length,
-        );
-        buffer.removeRange(0, lengthBytesCount + length);
-        final word = utf8.decode(wordBytes, allowMalformed: true);
-        words.add(word);
-      }
-    }
-
-    sub = _byteStream.stream.listen(
-      (chunk) {
-        buffer.addAll(chunk);
-        processBuffer();
-      },
-      onError: (err) {
-        timer?.cancel();
-        if (!completer.isCompleted) completer.completeError(err);
-      },
-      onDone: () {
-        timer?.cancel();
-        if (!completer.isCompleted) completer.complete(words);
-      },
-    );
 
     return completer.future;
   }
 
   /// Performs authentication with MikroTik RouterOS (v6.43+, v7, and older challenge-response fallback).
   Future<void> login(String username, String password) async {
+    _commandSentencesReceived = 0;
     // 1. Try modern plain login (/login with =name= and =password=)
     await writeSentence(['/login', '=name=$username', '=password=$password']);
     final response = await readSentence();
 
     if (response.isEmpty) {
-      throw const SocketException('لم يستجب الراوتر لطلب تسجيل الدخول');
+      throw const SocketException('لم يستجب الراوتر لطلب تسجيل الدخول: لا رد');
     }
 
     final status = response[0];
@@ -245,7 +347,18 @@ class RouterOsBinaryClient {
       throw AuthException(errMsg);
     }
 
-    throw AuthException('فشل تسجيل الدخول: استجابة غير متوقعة من الراوتر ($status)');
+    if (status == '!fatal') {
+      String errMsg = 'تم إغلاق الاتصال بواسطة الراوتر';
+      for (final word in response) {
+        if (word.startsWith('=message=')) {
+          errMsg = word.substring(9);
+          break;
+        }
+      }
+      throw AuthException('خطأ فادح أثناء تسجيل الدخول: $errMsg');
+    }
+
+    throw AuthException('رد غير مفهوم أثناء تسجيل الدخول من الراوتر ($status)');
   }
 
   Future<void> _authenticateChallengeResponse(
@@ -284,16 +397,63 @@ class RouterOsBinaryClient {
 
   /// Executes a RouterOS command and collects all `!re` reply sentences until `!done`.
   Future<List<Map<String, String>>> executeCommand(List<String> commandWords) async {
+    _commandSentencesReceived = 0;
     await writeSentence(commandWords);
     final List<Map<String, String>> records = [];
+    String? trapMessage;
+    String? trapCategory;
 
     while (true) {
-      final sentence = await readSentence();
-      if (sentence.isEmpty) break;
+      List<String> sentence;
+      try {
+        sentence = await readSentence();
+      } catch (e) {
+        if (trapMessage != null) {
+          final isPermission = trapCategory == '2' ||
+              trapMessage.toLowerCase().contains('permission') ||
+              trapMessage.toLowerCase().contains('not enough') ||
+              trapMessage.toLowerCase().contains('denied') ||
+              trapMessage.toLowerCase().contains('restricted');
+          final prefix = isPermission ? 'رفض صلاحيات (trap)' : 'خطأ راوتر (trap)';
+          throw RouterOsTrapException(
+            '$prefix: $trapMessage (عدد الجمل المستلمة: $_commandSentencesReceived)',
+            isPermission: isPermission,
+            category: trapCategory,
+          );
+        }
+        rethrow;
+      }
+
+      if (sentence.isEmpty) {
+        throw FormatException(
+          'رد غير مفهوم من الراوتر: تم استلام جملة فارغة بعد $_commandSentencesReceived جملة',
+        );
+      }
 
       final replyType = sentence[0];
+
       if (replyType == '!done') {
+        if (trapMessage != null) {
+          final isPermission = trapCategory == '2' ||
+              trapMessage.toLowerCase().contains('permission') ||
+              trapMessage.toLowerCase().contains('not enough') ||
+              trapMessage.toLowerCase().contains('denied') ||
+              trapMessage.toLowerCase().contains('restricted');
+          final prefix = isPermission ? 'رفض صلاحيات (trap)' : 'خطأ راوتر (trap)';
+          throw RouterOsTrapException(
+            '$prefix: $trapMessage (عدد الجمل المستلمة: $_commandSentencesReceived)',
+            isPermission: isPermission,
+            category: trapCategory,
+          );
+        }
         break;
+      } else if (replyType == '!empty') {
+        // RouterOS 7.18+ indicator: query produced no data records.
+        // Consume !empty and continue to read closing !done sentence.
+        if (_isSocketClosed && _incomingBuffer.isEmpty) {
+          break;
+        }
+        continue;
       } else if (replyType == '!re') {
         final Map<String, String> record = {};
         for (int i = 1; i < sentence.length; i++) {
@@ -311,14 +471,33 @@ class RouterOsBinaryClient {
         }
         records.add(record);
       } else if (replyType == '!trap') {
-        String msg = 'خطأ من راوتر MikroTik';
+        String msg = 'خطأ غير محدد من راوتر MikroTik';
+        String? cat;
         for (final word in sentence) {
           if (word.startsWith('=message=')) {
             msg = word.substring(9);
+          } else if (word.startsWith('=category=')) {
+            cat = word.substring(10);
+          }
+        }
+        trapMessage = msg;
+        trapCategory = cat;
+        // Continue loop to receive the terminating !done sentence if sent.
+      } else if (replyType == '!fatal') {
+        String fatalMsg = 'تم إنهاء الجلسة بواسطة الراوتر';
+        for (final word in sentence) {
+          if (word.startsWith('=message=')) {
+            fatalMsg = word.substring(9);
             break;
           }
         }
-        throw Exception(msg);
+        throw RouterOsFatalException(
+          'خطأ فادح (fatal): $fatalMsg (عدد الجمل المستلمة: $_commandSentencesReceived)',
+        );
+      } else {
+        throw FormatException(
+          'رد غير مفهوم من الراوتر ($replyType): تم استلام جملة بنوع غير معروف بعد $_commandSentencesReceived جملة',
+        );
       }
     }
 
