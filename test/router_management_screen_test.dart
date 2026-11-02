@@ -77,6 +77,8 @@ void main() {
     MikrotikDiscoveryService.resetTestStorage();
     MikrotikDiscoveryService.directConnectionTester = null;
     MikrotikDiscoveryService.probeHostTester = null;
+    MikrotikDiscoveryService.hotspotUsersDirectTester = null;
+    MikrotikDiscoveryService.hotspotSessionsDirectTester = null;
   });
 
   final sampleRouter = RouterModel(
@@ -113,6 +115,81 @@ void main() {
   }
 
   testWidgets('RouterDetailScreen displays router header and tabs', (tester) async {
+    MikrotikDiscoveryService.directConnectionTester = ({
+      required String host,
+      required int port,
+      required String username,
+      required String password,
+      String? connectionMethod,
+      Duration timeout = MikrotikDiscoveryService.defaultProbeTimeout,
+    }) async {
+      return {
+        'success': true,
+        'data': {
+          'boardName': 'RB750Gr3',
+          'version': '7.15.3',
+          'cpuLoad': 8,
+          'uptimeSeconds': 3600,
+          'identity': 'راوتر الفرع الرئيسي',
+        },
+      };
+    };
+
+    await MikrotikDiscoveryService.saveRouterCredentials(
+      routerId: sampleRouter.id,
+      username: 'admin',
+      password: 'password123',
+    );
+
+    MikrotikDiscoveryService.hotspotUsersDirectTester = ({
+      required String host,
+      required int port,
+      required String username,
+      required String password,
+      String? connectionMethod,
+      String? searchName,
+      int? limit,
+    }) async {
+      return {
+        'success': true,
+        'data': [
+          {
+            'username': 'hotspot_user_1',
+            'profile': 'default',
+            'isEnabled': true,
+            'uptimeSeconds': 1800,
+            'bytesIn': 1024000,
+            'bytesOut': 5120000,
+            'verifiedOnRouter': true,
+            'dbStatus': 'ACTIVE',
+          }
+        ],
+      };
+    };
+
+    MikrotikDiscoveryService.hotspotSessionsDirectTester = ({
+      required String host,
+      required int port,
+      required String username,
+      required String password,
+      String? connectionMethod,
+      int? limit,
+    }) async {
+      return {
+        'success': true,
+        'data': [
+          {
+            'username': 'hotspot_user_1',
+            'ipAddress': '192.168.88.50',
+            'macAddress': 'AA:BB:CC:DD:EE:FF',
+            'uptimeSeconds': 600,
+            'bytesIn': 512000,
+            'bytesOut': 2048000,
+          }
+        ],
+      };
+    };
+
     ApiClient.client = MockClient((request) async {
       if (request.url.path.contains('/hotspot-users')) {
         return utf8Response({

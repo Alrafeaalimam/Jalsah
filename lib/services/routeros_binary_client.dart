@@ -367,44 +367,70 @@ class RouterOsBinaryClient {
   /// Retrieves live HotSpot users directly from the router (/ip/hotspot/user/print).
   /// If [name] is provided, queries RouterOS with `?name=...` to avoid
   /// dumping large user databases during probes or specific lookups.
-  Future<List<Map<String, dynamic>>> getHotspotUsers({String? name}) async {
+  /// Omits sensitive password fields from proplist.
+  Future<List<Map<String, dynamic>>> getHotspotUsers({
+    String? name,
+    int? limit,
+  }) async {
     final words = ['/ip/hotspot/user/print'];
-    if (name != null && name.isNotEmpty) {
-      words.add('?name=$name');
+    if (name != null && name.trim().isNotEmpty) {
+      words.add('?name=${name.trim()}');
     }
-    words.add('=.proplist=.id,name,password,profile,uptime,bytes-in,bytes-out,disabled,comment');
+    words.add('=.proplist=.id,name,profile,uptime,bytes-in,bytes-out,disabled');
     final records = await executeCommand(words);
 
-    return records.map((r) => {
-      'id': r['.id'] ?? '',
-      'username': r['name'] ?? '',
-      'profile': r['profile'] ?? 'default',
-      'uptime': r['uptime'] ?? '0s',
-      'bytesIn': int.tryParse(r['bytes-in'] ?? '0') ?? 0,
-      'bytesOut': int.tryParse(r['bytes-out'] ?? '0') ?? 0,
-      'disabled': r['disabled'] == 'true',
-      'comment': r['comment'] ?? '',
-      'verifiedOnRouter': true,
-    }).toList();
+    final users = records.map((r) {
+      final uptimeStr = r['uptime'] ?? '0s';
+      final uptimeSec = parseRouterOsUptime(uptimeStr);
+      final isDisabled = r['disabled'] == 'true' || r['disabled'] == 'yes';
+      return {
+        'id': r['.id'] ?? '',
+        'username': r['name'] ?? '',
+        'profile': r['profile'] ?? 'default',
+        'uptime': uptimeStr,
+        'uptimeSeconds': uptimeSec,
+        'bytesIn': int.tryParse(r['bytes-in'] ?? '0') ?? 0,
+        'bytesOut': int.tryParse(r['bytes-out'] ?? '0') ?? 0,
+        'disabled': isDisabled,
+        'isEnabled': !isDisabled,
+        'comment': r['comment'] ?? '',
+        'verifiedOnRouter': true,
+      };
+    });
+
+    if (limit != null && limit > 0) {
+      return users.take(limit).toList();
+    }
+    return users.toList();
   }
 
   /// Retrieves live active HotSpot sessions directly from the router (/ip/hotspot/active/print).
-  Future<List<Map<String, dynamic>>> getHotspotActiveSessions() async {
+  Future<List<Map<String, dynamic>>> getHotspotActiveSessions({int? limit}) async {
     final records = await executeCommand([
       '/ip/hotspot/active/print',
       '=.proplist=.id,user,address,mac-address,uptime,bytes-in,bytes-out,login-by',
     ]);
 
-    return records.map((r) => {
-      'id': r['.id'] ?? '',
-      'username': r['user'] ?? '',
-      'ipAddress': r['address'] ?? '',
-      'macAddress': r['mac-address'] ?? '',
-      'uptime': r['uptime'] ?? '0s',
-      'bytesIn': int.tryParse(r['bytes-in'] ?? '0') ?? 0,
-      'bytesOut': int.tryParse(r['bytes-out'] ?? '0') ?? 0,
-      'loginBy': r['login-by'] ?? '',
-    }).toList();
+    final sessions = records.map((r) {
+      final uptimeStr = r['uptime'] ?? '0s';
+      final uptimeSec = parseRouterOsUptime(uptimeStr);
+      return {
+        'id': r['.id'] ?? '',
+        'username': r['user'] ?? '',
+        'ipAddress': r['address'] ?? '',
+        'macAddress': r['mac-address'] ?? '',
+        'uptime': uptimeStr,
+        'uptimeSeconds': uptimeSec,
+        'bytesIn': int.tryParse(r['bytes-in'] ?? '0') ?? 0,
+        'bytesOut': int.tryParse(r['bytes-out'] ?? '0') ?? 0,
+        'loginBy': r['login-by'] ?? '',
+      };
+    });
+
+    if (limit != null && limit > 0) {
+      return sessions.take(limit).toList();
+    }
+    return sessions.toList();
   }
 
   /// Toggles (enables/disables) a HotSpot user directly on the router.
@@ -412,14 +438,19 @@ class RouterOsBinaryClient {
     final records = await executeCommand([
       '/ip/hotspot/user/print',
       '?name=$username',
-      '=.proplist=.id',
+      '=.proplist=.id,name',
     ]);
 
-    if (records.isEmpty || records[0]['.id'] == null) {
+    final matching = records.firstWhere(
+      (r) => r['name'] == username && r['.id'] != null,
+      orElse: () => {},
+    );
+
+    if (matching.isEmpty || matching['.id'] == null) {
       throw Exception('المستخدم $username غير موجود على الراوتر');
     }
 
-    final id = records[0]['.id']!;
+    final id = matching['.id']!;
     await executeCommand([
       '/ip/hotspot/user/set',
       '=.id=$id',
@@ -430,22 +461,39 @@ class RouterOsBinaryClient {
   }
 
   /// Disconnects an active HotSpot session directly on the router (/ip/hotspot/active/remove).
+  /// Strictly matches the username completely to prevent disconnecting similar or prefix usernames.
   Future<bool> disconnectHotspotSession(String username) async {
     final records = await executeCommand([
       '/ip/hotspot/active/print',
       '?user=$username',
-      '=.proplist=.id',
+      '=.proplist=.id,user',
     ]);
 
-    if (records.isEmpty || records[0]['.id'] == null) {
+    if (records.isEmpty) {
       throw Exception('لا توجد جلسة نشطة للمستخدم $username على الراوتر');
     }
 
-    final id = records[0]['.id']!;
-    await executeCommand([
-      '/ip/hotspot/active/remove',
-      '=.id=$id',
-    ]);
+    bool anyRemoved = false;
+    for (final record in records) {
+      final sessionUser = record['user'];
+      // Enforce strict full name equality
+      if (sessionUser == null || sessionUser != username) {
+        continue;
+      }
+
+      final id = record['.id'];
+      if (id != null && id.isNotEmpty) {
+        await executeCommand([
+          '/ip/hotspot/active/remove',
+          '=.id=$id',
+        ]);
+        anyRemoved = true;
+      }
+    }
+
+    if (!anyRemoved) {
+      throw Exception('لا توجد جلسة نشطة مطابقة تماماً للمستخدم $username على الراوتر');
+    }
 
     return true;
   }

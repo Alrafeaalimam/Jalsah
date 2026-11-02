@@ -5,6 +5,7 @@
 // Master Reference: Rule 16 (Clean Architecture), Rule 23 (Error Handling)
 // ============================================================================
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -59,7 +60,7 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
 
   Future<void> _initScreen() async {
     if (MikrotikDiscoveryService.isLocalPrivateIp(_router.host)) {
-      await _verifyInitialConnectionOnOpen();
+      unawaited(_verifyInitialConnectionOnOpen());
     }
     _loadHotspotUsers();
     _loadActiveSessions();
@@ -241,8 +242,12 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
                 lastSeenAt: DateTime.now(),
                 lastErrorMessage: null,
               );
-              _testSuccessMessage = 'تم الاتصال بالراوتر بنجاح ومصادقة البيانات عبر الشبكة المحلية (منفذ ${_router.apiPort})';
+              _testSuccessMessage = 'تم الاتصال بالراوتر بنجاح ومصادقة البيانات عبر الشبكة المحلية ($newBoard - $newVersion)';
             });
+
+            // Reload users and sessions on successful live local probe
+            _loadHotspotUsers();
+            _loadActiveSessions();
 
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -448,29 +453,43 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
 
     if (isLocal) {
       final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
-      if (creds != null &&
-          creds['username'] != null &&
-          creds['username']!.isNotEmpty &&
-          creds['password'] != null) {
-        final directResult = await MikrotikDiscoveryService.getHotspotUsersDirect(
-          host: _router.host,
-          port: _router.apiPort,
-          username: creds['username']!,
-          password: creds['password']!,
-          connectionMethod: _router.connectionMethod,
-        );
-
+      if (creds == null ||
+          creds['username'] == null ||
+          creds['username']!.isEmpty ||
+          creds['password'] == null) {
         if (!mounted) return;
+        setState(() {
+          _isLoadingUsers = false;
+          _usersError = 'فشل خطوة (جلب مستخدمي الهوتسبوت): بيانات اعتماد الراوتر غير متوفرة محلياً على هذا الجهاز. يرجى تعديل بيانات الراوتر وحفظ كلمة المرور.';
+        });
+        return;
+      }
 
-        if (directResult['success'] == true) {
-          final rawList = directResult['data'] as List<dynamic>? ?? [];
-          setState(() {
-            _hotspotUsers = rawList.map((e) => e as Map<String, dynamic>).toList();
-            _isLoadingUsers = false;
-            _usersError = null;
-          });
-          return;
-        }
+      final directResult = await MikrotikDiscoveryService.getHotspotUsersDirect(
+        host: _router.host,
+        port: _router.apiPort,
+        username: creds['username']!,
+        password: creds['password']!,
+        connectionMethod: _router.connectionMethod,
+      );
+
+      if (!mounted) return;
+
+      if (directResult['success'] == true) {
+        final rawList = directResult['data'] as List<dynamic>? ?? [];
+        setState(() {
+          _hotspotUsers = rawList.map((e) => e as Map<String, dynamic>).toList();
+          _isLoadingUsers = false;
+          _usersError = null;
+        });
+        return;
+      } else {
+        final err = directResult['errorMessage'] ?? 'فشل خطوة (جلب مستخدمي الهوتسبوت) من الراوتر المحلي (${_router.host}:${_router.apiPort})';
+        setState(() {
+          _isLoadingUsers = false;
+          _usersError = err;
+        });
+        return;
       }
     }
 
@@ -508,29 +527,43 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
 
     if (isLocal) {
       final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
-      if (creds != null &&
-          creds['username'] != null &&
-          creds['username']!.isNotEmpty &&
-          creds['password'] != null) {
-        final directResult = await MikrotikDiscoveryService.getHotspotActiveSessionsDirect(
-          host: _router.host,
-          port: _router.apiPort,
-          username: creds['username']!,
-          password: creds['password']!,
-          connectionMethod: _router.connectionMethod,
-        );
-
+      if (creds == null ||
+          creds['username'] == null ||
+          creds['username']!.isEmpty ||
+          creds['password'] == null) {
         if (!mounted) return;
+        setState(() {
+          _isLoadingSessions = false;
+          _sessionsError = 'فشل خطوة (جلب الجلسات النشطة): بيانات اعتماد الراوتر غير متوفرة محلياً على هذا الجهاز. يرجى تعديل بيانات الراوتر وحفظ كلمة المرور.';
+        });
+        return;
+      }
 
-        if (directResult['success'] == true) {
-          final rawList = directResult['data'] as List<dynamic>? ?? [];
-          setState(() {
-            _activeSessions = rawList.map((e) => e as Map<String, dynamic>).toList();
-            _isLoadingSessions = false;
-            _sessionsError = null;
-          });
-          return;
-        }
+      final directResult = await MikrotikDiscoveryService.getHotspotActiveSessionsDirect(
+        host: _router.host,
+        port: _router.apiPort,
+        username: creds['username']!,
+        password: creds['password']!,
+        connectionMethod: _router.connectionMethod,
+      );
+
+      if (!mounted) return;
+
+      if (directResult['success'] == true) {
+        final rawList = directResult['data'] as List<dynamic>? ?? [];
+        setState(() {
+          _activeSessions = rawList.map((e) => e as Map<String, dynamic>).toList();
+          _isLoadingSessions = false;
+          _sessionsError = null;
+        });
+        return;
+      } else {
+        final err = directResult['errorMessage'] ?? 'فشل خطوة (جلب الجلسات النشطة) من الراوتر المحلي (${_router.host}:${_router.apiPort})';
+        setState(() {
+          _isLoadingSessions = false;
+          _sessionsError = err;
+        });
+        return;
       }
     }
 
@@ -578,37 +611,63 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
 
     if (isLocal) {
       final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
-      if (creds != null &&
-          creds['username'] != null &&
-          creds['username']!.isNotEmpty &&
-          creds['password'] != null) {
-        final directResult = await MikrotikDiscoveryService.toggleHotspotUserDirect(
-          host: _router.host,
-          port: _router.apiPort,
-          username: creds['username']!,
-          password: creds['password']!,
-          targetUsername: username,
-          isEnabled: newEnabled,
-          connectionMethod: _router.connectionMethod,
-        );
-
+      if (creds == null ||
+          creds['username'] == null ||
+          creds['username']!.isEmpty ||
+          creds['password'] == null) {
         if (!mounted) return;
-
-        if (directResult['success'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: AppColors.statusOnline,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              content: Text(
-                newEnabled ? 'تم تفعيل المستخدم $username بنجاح على الراوتر' : 'تم تعطيل المستخدم $username بنجاح على الراوتر',
-                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            content: Text(
+              'فشل خطوة (تعديل حالة المستخدم): بيانات اعتماد الراوتر غير متوفرة محلياً على هذا الجهاز.',
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
             ),
-          );
-          _loadHotspotUsers();
-          return;
-        }
+          ),
+        );
+        return;
+      }
+
+      final directResult = await MikrotikDiscoveryService.toggleHotspotUserDirect(
+        host: _router.host,
+        port: _router.apiPort,
+        username: creds['username']!,
+        password: creds['password']!,
+        targetUsername: username,
+        isEnabled: newEnabled,
+        connectionMethod: _router.connectionMethod,
+      );
+
+      if (!mounted) return;
+
+      if (directResult['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOnline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text(
+              newEnabled ? 'تم تفعيل المستخدم $username بنجاح على الراوتر' : 'تم تعطيل المستخدم $username بنجاح على الراوتر',
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+        _loadHotspotUsers();
+        return;
+      } else {
+        final err = directResult['errorMessage'] ?? 'فشل خطوة (تعديل حالة المستخدم) على الراوتر المحلي';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text(
+              err,
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+        return;
       }
     }
 
@@ -690,36 +749,62 @@ class _RouterDetailScreenState extends State<RouterDetailScreen>
 
     if (isLocal) {
       final creds = await MikrotikDiscoveryService.getRouterCredentials(_router.id);
-      if (creds != null &&
-          creds['username'] != null &&
-          creds['username']!.isNotEmpty &&
-          creds['password'] != null) {
-        final directResult = await MikrotikDiscoveryService.disconnectHotspotSessionDirect(
-          host: _router.host,
-          port: _router.apiPort,
-          username: creds['username']!,
-          password: creds['password']!,
-          targetUsername: username,
-          connectionMethod: _router.connectionMethod,
-        );
-
+      if (creds == null ||
+          creds['username'] == null ||
+          creds['username']!.isEmpty ||
+          creds['password'] == null) {
         if (!mounted) return;
-
-        if (directResult['success'] == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: AppColors.statusOnline,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              content: Text(
-                'تم فصل جلسة المستخدم $username بنجاح من الراوتر',
-                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            content: Text(
+              'فشل خطوة (فصل الجلسة): بيانات اعتماد الراوتر غير متوفرة محلياً على هذا الجهاز.',
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
             ),
-          );
-          _loadActiveSessions();
-          return;
-        }
+          ),
+        );
+        return;
+      }
+
+      final directResult = await MikrotikDiscoveryService.disconnectHotspotSessionDirect(
+        host: _router.host,
+        port: _router.apiPort,
+        username: creds['username']!,
+        password: creds['password']!,
+        targetUsername: username,
+        connectionMethod: _router.connectionMethod,
+      );
+
+      if (!mounted) return;
+
+      if (directResult['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOnline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text(
+              'تم فصل جلسة المستخدم $username بنجاح من الراوتر',
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+        _loadActiveSessions();
+        return;
+      } else {
+        final err = directResult['errorMessage'] ?? 'فشل خطوة (فصل الجلسة) من الراوتر المحلي';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: AppColors.statusOffline,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text(
+              err,
+              style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
+        return;
       }
     }
 
