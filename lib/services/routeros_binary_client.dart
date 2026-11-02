@@ -505,6 +505,8 @@ class RouterOsBinaryClient {
   }
 
   /// Queries the router system identity and resources.
+  /// Reading /system/resource is strictly optional: if it fails or returns empty,
+  /// boardName and version fallback to 'غير متوفر' without failing the connection test.
   Future<Map<String, dynamic>> readSystemInfo() async {
     // Read Identity
     String identity = 'MikroTik';
@@ -513,24 +515,41 @@ class RouterOsBinaryClient {
       if (identityRecords.isNotEmpty && identityRecords[0]['name'] != null) {
         identity = identityRecords[0]['name']!.trim();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[readSystemInfo] تعذر قراءة /system/identity: ${_sanitizeErrorMessage(e.toString())}');
+    }
 
-    // Read Resources
-    String version = 'RouterOS';
-    String boardName = 'MikroTik Router';
+    // Read Resources (Optional)
+    String version = 'غير متوفر';
+    String boardName = 'غير متوفر';
     int cpuLoad = 0;
     int uptimeSeconds = 0;
+    String? resourceFailureReason;
 
     try {
       final resourceRecords = await executeCommand(['/system/resource/print']);
       if (resourceRecords.isNotEmpty) {
         final r = resourceRecords[0];
-        if (r['version'] != null) version = r['version']!.trim();
-        if (r['board-name'] != null) boardName = r['board-name']!.trim();
-        if (r['cpu-load'] != null) cpuLoad = int.tryParse(r['cpu-load']!.trim()) ?? 0;
-        if (r['uptime'] != null) uptimeSeconds = parseRouterOsUptime(r['uptime']!.trim());
+        if (r['version'] != null && r['version']!.trim().isNotEmpty) {
+          version = r['version']!.trim();
+        }
+        if (r['board-name'] != null && r['board-name']!.trim().isNotEmpty) {
+          boardName = r['board-name']!.trim();
+        }
+        if (r['cpu-load'] != null) {
+          cpuLoad = int.tryParse(r['cpu-load']!.trim()) ?? 0;
+        }
+        if (r['uptime'] != null) {
+          uptimeSeconds = parseRouterOsUptime(r['uptime']!.trim());
+        }
+      } else {
+        resourceFailureReason = 'قائمة الموارد /system/resource فارغة';
+        debugPrint('[readSystemInfo] تعذر قراءة /system/resource: $resourceFailureReason');
       }
-    } catch (_) {}
+    } catch (e) {
+      resourceFailureReason = _sanitizeErrorMessage(e.toString());
+      debugPrint('[readSystemInfo] تعذر قراءة /system/resource (اختيارية): $resourceFailureReason');
+    }
 
     return {
       'identity': identity,
@@ -539,8 +558,16 @@ class RouterOsBinaryClient {
       'cpuLoad': cpuLoad,
       'uptimeSeconds': uptimeSeconds,
       'isDirectLocal': true,
+      'resourceFailureReason': resourceFailureReason,
       'protocol': (port != 8728 && (useTls || port == 8729)) ? 'ROUTEROS_API_SSL' : 'ROUTEROS_API_PLAIN',
     };
+  }
+
+  /// Strips any passwords or raw credentials from strings for safe logging.
+  static String _sanitizeErrorMessage(String message) {
+    return message
+        .replaceAll(RegExp(r'=password=[^\s,;)]+', caseSensitive: false), '=password=***')
+        .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***');
   }
 
   /// Retrieves live HotSpot users directly from the router (/ip/hotspot/user/print).

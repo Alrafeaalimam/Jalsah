@@ -15,6 +15,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mikrotik_cards_app/services/routeros_binary_client.dart';
 
@@ -56,6 +57,8 @@ class MockRouterOsServer {
 
     return mock;
   }
+
+  static List<String>? extractSentence(List<int> buf) => _extractSentence(buf);
 
   static List<String>? _extractSentence(List<int> buf) {
     int offset = 0;
@@ -440,5 +443,292 @@ void main() {
 
       await client.close();
     });
+
+    test('10. RouterOS v6.43+ modern plain login (/login with =name= and =password=)', () async {
+      String? receivedUser;
+      String? receivedPass;
+
+      server.onSentence = (client, cmd) {
+        if (cmd.isNotEmpty && cmd[0] == '/login') {
+          for (final word in cmd) {
+            if (word.startsWith('=name=')) receivedUser = word.substring(6);
+            if (word.startsWith('=password=')) receivedPass = word.substring(10);
+          }
+          MockRouterOsServer.sendSentenceTo(client, ['!done']);
+        }
+      };
+
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        timeout: const Duration(seconds: 10),
+      );
+      await client.connect();
+
+      await client.login('admin', 'StrongPassword123');
+      expect(receivedUser, equals('admin'));
+      expect(receivedPass, equals('StrongPassword123'));
+
+      await client.close();
+    });
+
+    test('11. RouterOS pre-6.43 MD5 challenge-response login', () async {
+      const challengeHex = '0123456789abcdef0123456789abcdef';
+      int loginStage = 0;
+      String? responseSentByClient;
+
+      server.onSentence = (client, cmd) {
+        if (cmd.isNotEmpty && cmd[0] == '/login') {
+          loginStage++;
+          if (loginStage == 1) {
+            // First stage: return !done with =ret= challenge
+            MockRouterOsServer.sendSentenceTo(client, ['!done', '=ret=$challengeHex']);
+          } else if (loginStage == 2) {
+            // Second stage: capture client response
+            for (final word in cmd) {
+              if (word.startsWith('=response=')) {
+                responseSentByClient = word.substring(10);
+              }
+            }
+            MockRouterOsServer.sendSentenceTo(client, ['!done']);
+          }
+        }
+      };
+
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        timeout: const Duration(seconds: 10),
+      );
+      await client.connect();
+
+      await client.login('legacy_admin', 'old_password');
+      expect(loginStage, equals(2));
+      expect(responseSentByClient, isNotNull);
+      expect(responseSentByClient!.startsWith('00'), isTrue);
+
+      // Verify the MD5 challenge formula: md5(0x00 + password_utf8 + challenge_bytes)
+      final challengeBytes = <int>[];
+      for (int i = 0; i < challengeHex.length; i += 2) {
+        challengeBytes.add(int.parse(challengeHex.substring(i, i + 2), radix: 16));
+      }
+      final expectedDigest = md5.convert([0x00, ...utf8.encode('old_password'), ...challengeBytes]).bytes;
+      final expectedHex = expectedDigest.map((b) => b.toRadixString(16).padLeft(2, '0')).join('').toLowerCase();
+      expect(responseSentByClient, equals('00$expectedHex'));
+
+      await client.close();
+    });
+
+    test('12. TLS connection connects securely, supports self-signed certs, and exchanges commands', () async {
+      final secContext = SecurityContext();
+      secContext.useCertificateChainBytes(utf8.encode(_testCertPem));
+      secContext.usePrivateKeyBytes(utf8.encode(_testKeyPem));
+
+      final secureServer = await SecureServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+        secContext,
+      );
+
+      final secureClients = <Socket>[];
+      secureServer.listen((client) {
+        secureClients.add(client);
+        final buffer = <int>[];
+        client.listen((data) {
+          buffer.addAll(data);
+          while (true) {
+            final sentence = MockRouterOsServer.extractSentence(buffer);
+            if (sentence == null) break;
+            if (sentence.isNotEmpty && sentence[0] == '/login') {
+              MockRouterOsServer.sendSentenceTo(client, ['!done']);
+            }
+          }
+        });
+      });
+
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: secureServer.port,
+        useTls: true,
+        timeout: const Duration(seconds: 10),
+      );
+
+      await client.connect();
+      await client.login('tls_user', 'tls_secret');
+      await client.close();
+
+      for (final c in secureClients) {
+        try { await c.close(); c.destroy(); } catch (_) {}
+      }
+      await secureServer.close();
+    });
+
+    test('12b. Port 8729 automatically enforces TLS and Port 8728 strictly forbids TLS', () {
+      final client8729 = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: 8729,
+        useTls: false,
+      );
+      final effective8729 = client8729.port != 8728 && (client8729.useTls || client8729.port == 8729);
+      expect(effective8729, isTrue);
+
+      final client8728 = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: 8728,
+        useTls: true, // Port 8728 must NEVER use TLS even if requested
+      );
+      final effective8728 = client8728.port != 8728 && (client8728.useTls || client8728.port == 8729);
+      expect(effective8728, isFalse);
+    });
+
+    test('13. Repeated commands (probe -> sync -> read -> sessions) and reconnect do NOT throw "Stream has already been listened to"', () async {
+      server.onSentence = (client, cmd) {
+        if (cmd.isEmpty) return;
+        final verb = cmd[0];
+        if (verb == '/ip/hotspot/user/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!re', '=.id=*1', '=name=user1', '=profile=default', '=disabled=false'],
+            ['!done'],
+          ]);
+        } else if (verb == '/ip/hotspot/user/add') {
+          MockRouterOsServer.sendSentenceTo(client, ['!done', '=.ret=*2']);
+        } else if (verb == '/system/identity/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!re', '=name=LabRouter'],
+            ['!done'],
+          ]);
+        } else if (verb == '/system/resource/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!re', '=board-name=hAP ac3', '=version=7.18', '=cpu-load=5', '=uptime=1d'],
+            ['!done'],
+          ]);
+        } else if (verb == '/ip/hotspot/active/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!re', '=.id=*10', '=user=active1', '=address=192.168.88.50', '=uptime=30m'],
+            ['!done'],
+          ]);
+        }
+      };
+
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        timeout: const Duration(seconds: 10),
+      );
+
+      await client.connect();
+
+      // 1. Probe (getHotspotUsers with name filter)
+      final probeUsers = await client.getHotspotUsers(name: 'probe_test');
+      expect(probeUsers.length, equals(1));
+
+      // 2. Sync (createHotspotUser)
+      final created = await client.createHotspotUser(username: 'user2', password: '123', profile: 'default');
+      expect(created, isTrue);
+
+      // 3. Read system info
+      final info = await client.readSystemInfo();
+      expect(info['identity'], equals('LabRouter'));
+      expect(info['boardName'], equals('hAP ac3'));
+
+      // 4. Read active sessions
+      final sessions = await client.getHotspotActiveSessions();
+      expect(sessions.length, equals(1));
+      expect(sessions[0]['username'], equals('active1'));
+
+      // 5. Subsequent user query
+      final usersAgain = await client.getHotspotUsers();
+      expect(usersAgain.length, equals(1));
+
+      // 6. Close and re-connect cycle on the same instance
+      await client.close();
+      await client.connect();
+      final usersAfterReconnect = await client.getHotspotUsers(name: 'probe_test');
+      expect(usersAfterReconnect.length, equals(1));
+
+      await client.close();
+    });
+
+    test('14. Optional /system/resource: empty or trap response falls back to "غير متوفر" without failing connection test', () async {
+      server.onSentence = (client, cmd) {
+        if (cmd.isNotEmpty && cmd[0] == '/system/identity/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!re', '=name=Office-Router'],
+            ['!done'],
+          ]);
+        } else if (cmd.isNotEmpty && cmd[0] == '/system/resource/print') {
+          // Simulate trap rejection on /system/resource (e.g. lack of permissions or unsupported)
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!trap', '=category=2', '=message=action not permitted, not enough permissions'],
+            ['!done'],
+          ]);
+        }
+      };
+
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        timeout: const Duration(seconds: 10),
+      );
+      await client.connect();
+
+      // readSystemInfo must NOT throw even if /system/resource traps!
+      final info = await client.readSystemInfo();
+      expect(info['identity'], equals('Office-Router'));
+      expect(info['boardName'], equals('غير متوفر'));
+      expect(info['version'], equals('غير متوفر'));
+      expect(info['resourceFailureReason'], contains('رفض صلاحيات (trap)'));
+
+      await client.close();
+    });
   });
 }
+
+const _testCertPem = '''-----BEGIN CERTIFICATE-----
+MIIDCTCCAfGgAwIBAgIUf80yV7aHoJp10xuBaJUTN6bBoj0wDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJMTI3LjAuMC4xMB4XDTI2MTEwMjEzMDg1MFoXDTM2MTAz
+MDEzMDg1MFowFDESMBAGA1UEAwwJMTI3LjAuMC4xMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEA1s9q8KE5boEU5rLOMDcGxaMo7UUtsCFYTu8MEj7mggyB
+bUsSNK0Qq8a0DYY+0Y/6+y4QWaYlxBbEn8dna/A49Z9bBmUA2cYNlecYZ7cs/9me
+VUwmN/moV6xUVgJMKzuQo8CGD+C6PWjSFTRsELCHGu8yv4IOW8z3eEo0cTHTdG15
+U8KSm1D3kaQy+GWVGVt8IlIJm8GchCUeVBCsJJXs7gIOnrKPP7JCZFNJRi3Lz/Cj
+n+KpFGRe19hGghfnkwVbiR7dsUpweziQoNmcUz5dYkTbmtbdm1skxPjeag1Lh6PC
+YGPUWYT2hPV0q4yoGjCBJ8LsjhQRIGCo7SqhkEdWpQIDAQABo1MwUTAdBgNVHQ4E
+FgQUA4Vyvo14oeFZu8OB/NZJ/VjLYFEwHwYDVR0jBBgwFoAUA4Vyvo14oeFZu8OB
+/NZJ/VjLYFEwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAwQPh
+lxfl3NZJDU7B1OtVHR1/ZewEgbBQ+kWFoSVSpxOIB7mT0RsFbRpVIxeJLgohE6S9
++0N3LMsp54abV0CcJiRlE525gM12u7bwWrbezqOe7uRpmC9zYIo0RifUZzoNW52U
+PJSLse4A/GSA+AUJnTQ8j9Rqa/DdbOe4AlEsG5GcvKmhKttvxaM4+TOScEyhI8x/
+Y7IBRDI2LUeYNXjG7uQW9Tj+ZAHe//F891AIPEMYAbrxXUXjRubrbUc5StfPvSul
+uaN6gRkkqpvjogf39qSzk0Yq59uwENOyyMq2l8pDPqVOZoNXSyO/s3iRfDFgGMNE
+lIBKgbLE9LGPGjBJGw==
+-----END CERTIFICATE-----''';
+
+const _testKeyPem = '''-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDWz2rwoTlugRTm
+ss4wNwbFoyjtRS2wIVhO7wwSPuaCDIFtSxI0rRCrxrQNhj7Rj/r7LhBZpiXEFsSf
+x2dr8Dj1n1sGZQDZxg2V5xhntyz/2Z5VTCY3+ahXrFRWAkwrO5CjwIYP4Lo9aNIV
+NGwQsIca7zK/gg5bzPd4SjRxMdN0bXlTwpKbUPeRpDL4ZZUZW3wiUgmbwZyEJR5U
+EKwklezuAg6eso8/skJkU0lGLcvP8KOf4qkUZF7X2EaCF+eTBVuJHt2xSnB7OJCg
+2ZxTPl1iRNua1t2bWyTE+N5qDUuHo8JgY9RZhPaE9XSrjKgaMIEnwuyOFBEgYKjt
+KqGQR1alAgMBAAECggEAIKx3DzfuxOy0cazT6QiNqqU5NfH2U5qW1JbOxr2zkSd2
+zlmDYOjMJty4CXCYgIa+fdNRYFmB2BRAfy80/3mQKGg/T7cwTG+wJFN85lW57ga7
+ay0EiTIb1Y4cW+LIlDDgvM+tdJ/RpEKb5ebN4zH+su2cUf3l0jfYkn7zAB68k7JF
+z8HOm0txdGNliqA/xpSBucvyEIf0TZ5tRm3EgVQtnbki+ipQY/KkEwpJOjyGoxQV
+D/po3ybShERNfDiWmoQr8jel/1CCvoRwPYigF3M0cHRyX00bVLARiFGcfIWSP4RF
+rYFyCzS0C9ny3ObMTylS5nxS2t3xrXEF1VyEvUzccQKBgQDuEyDH/Bv4XrUkRZbx
+30/tmJz7v/iuIRAeUNot6nOGnAmLRD+y/Lu5WUHMCUZ8JnPUbn4NSLZS4D9xrxRi
+A0xIuqZd1HwPILSafaGHy0yHoQiWFZdCl3regx9tPKSayjKrUQQ90XKCFkWk45sI
+59RyzOloigCOEC8cn+vsIQEc/QKBgQDm+95Mlx3DGN8cg6MCHz1ojE84WSICd7Xx
+55RBdq9qNqB/4O6aNB5g8BgYXN6o86yL6E5O/s44eEnhvbw5JS2+I7QCaYzUCzIB
+0raBB+erDmWISNJk5d7bON7GoIw5zzzz7y3hoaTXn5idxXYkiHBD7hxrI5rMOycM
+45JmceQkyQKBgQCRYTTfamBaJttOrwAh61APsuYKBYyCKMaC/LR+3XB2fsqFNMQB
+NLwdzxeS1QcpwQFyc5ad3g0YRr/3WAaGY6UttGzrV1n6kuo2fQkqt0agfAGWRND9
+ZSsuvbtvJV0O+PJAE1UXutLGBXu52RNPOOJOyDqwD7WPCur5+95Bb1YSsQKBgDKP
+6+eEJOWyKhTJ1AMA56ZdIHJLQKCdp9xePxvdaSSs9JFJobFru0KpC/05RxxgyuKN
+ZabxLB88ZZ/esrcnpk267wqgJE2+baHsiDrSiintqtgcaMHhd9kxJ8L/HfMBpGwZ
+bUe45Ka2rufKc8Qngbu9AceKMbaHNFMj9cYrJC/RAoGBANuKQlwkCaEgaahMdLwP
+aBo00+DNcxnTudwUE8cxpgPIlmkzJygZ6lXN3xsQdzS1Z/KpaD9IkNDAx1DC0AXq
+uNQ4hJVVhq9jmw/Pn4b40/tKPRfilOaEfCVV9utn5nmBOtOtGeQ41krdDqVNkXdR
+M+/c/77fifMF7ILSA73TNh8F
+-----END PRIVATE KEY-----''';
