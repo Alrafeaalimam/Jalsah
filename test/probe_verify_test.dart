@@ -360,5 +360,160 @@ void main() {
 
       await client.close();
     });
+
+    test('5. Empty or invalid ID executes NO command on router and returns false', () async {
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        useTls: false,
+        timeout: const Duration(seconds: 3),
+      );
+
+      final List<List<String>> executedCommands = [];
+      server.onSentence = (c, sentence) {
+        executedCommands.add(sentence);
+        if (sentence[0] == '/login') {
+          MockRouterOsServer.sendSentenceTo(c, ['!done']);
+        }
+      };
+
+      await client.connect();
+      await client.login('admin', '1234');
+      executedCommands.clear();
+
+      // Test empty, whitespace, and invalid ID patterns
+      expect(await client.removeHotspotUserById(''), isFalse);
+      expect(await client.removeHotspotUserById('   '), isFalse);
+      expect(await client.removeHotspotUserById('user1'), isFalse);
+      expect(await client.removeHotspotUserById('null'), isFalse);
+      expect(await client.removeHotspotUserById('*'), isFalse);
+      expect(await client.removeHotspotUserById('*xyz'), isFalse);
+
+      // Verify no remove command was ever sent to the server
+      final removeCommands = executedCommands
+          .where((cmd) => cmd.isNotEmpty && cmd[0] == '/ip/hotspot/user/remove')
+          .toList();
+      expect(removeCommands, isEmpty);
+
+      await client.close();
+    });
+
+    test('6. "no such item" on primary format returns false and NEVER attempts fallback format', () async {
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        useTls: false,
+        timeout: const Duration(seconds: 3),
+      );
+
+      final List<List<String>> removeCommands = [];
+      server.onSentence = (c, sentence) {
+        if (sentence[0] == '/login') {
+          MockRouterOsServer.sendSentenceTo(c, ['!done']);
+        } else if (sentence[0] == '/ip/hotspot/user/remove') {
+          removeCommands.add(sentence);
+          MockRouterOsServer.sendSentencesBurstTo(c, [
+            ['!trap', '=message=failure: no such item'],
+            ['!done'],
+          ]);
+        }
+      };
+
+      await client.connect();
+      await client.login('admin', '1234');
+
+      final removed = await client.removeHotspotUserById('*10A');
+      expect(removed, isFalse);
+
+      // Only ONE command using =.numbers=*10A was sent, NO fallback format was attempted
+      expect(removeCommands.length, equals(1));
+      expect(removeCommands[0], contains('=.numbers=*10A'));
+
+      await client.close();
+    });
+
+    test('7. "unknown parameter" on primary format triggers fallback format =.id=ID', () async {
+      final client = RouterOsBinaryClient(
+        host: '127.0.0.1',
+        port: server.port,
+        useTls: false,
+        timeout: const Duration(seconds: 3),
+      );
+
+      final List<List<String>> removeCommands = [];
+      server.onSentence = (c, sentence) {
+        if (sentence[0] == '/login') {
+          MockRouterOsServer.sendSentenceTo(c, ['!done']);
+        } else if (sentence[0] == '/ip/hotspot/user/remove') {
+          removeCommands.add(sentence);
+          if (sentence.contains('=.numbers=*10A')) {
+            // First attempt with =.numbers fails with unknown parameter
+            MockRouterOsServer.sendSentencesBurstTo(c, [
+              ['!trap', '=message=unknown parameter .numbers'],
+              ['!done'],
+            ]);
+          } else if (sentence.contains('=.id=*10A')) {
+            // Fallback attempt succeeds
+            MockRouterOsServer.sendSentenceTo(c, ['!done']);
+          }
+        }
+      };
+
+      await client.connect();
+      await client.login('admin', '1234');
+
+      final removed = await client.removeHotspotUserById('*10A');
+      expect(removed, isTrue);
+
+      // Exactly two commands: primary format then fallback format
+      expect(removeCommands.length, equals(2));
+      expect(removeCommands[0], contains('=.numbers=*10A'));
+      expect(removeCommands[1], contains('=.id=*10A'));
+
+      await client.close();
+    });
+
+    test('8. probeRouter executes remove ONLY with the exact ID returned by add', () async {
+      final router = RouterModel(
+        id: 'router-exact-id-test',
+        name: 'Exact ID Router',
+        host: '127.0.0.1',
+        apiPort: server.port,
+        status: 'ONLINE',
+        connectionMethod: 'ROUTEROS_API_PLAIN',
+      );
+
+      await MikrotikDiscoveryService.saveRouterCredentials(
+        routerId: router.id,
+        username: 'admin',
+        password: 'password123',
+      );
+
+      final List<List<String>> removeCommands = [];
+
+      server.onSentence = (client, sentence) {
+        final cmd = sentence[0];
+        if (cmd == '/login') {
+          MockRouterOsServer.sendSentenceTo(client, ['!done']);
+        } else if (cmd == '/ip/hotspot/user/print') {
+          MockRouterOsServer.sendSentencesBurstTo(client, [
+            ['!empty'],
+            ['!done'],
+          ]);
+        } else if (cmd == '/ip/hotspot/user/add') {
+          // Returns exact unique ID =ret=*99B
+          MockRouterOsServer.sendSentenceTo(client, ['!done', '=ret=*99B']);
+        } else if (cmd == '/ip/hotspot/user/remove') {
+          removeCommands.add(sentence);
+          MockRouterOsServer.sendSentenceTo(client, ['!done']);
+        }
+      };
+
+      final result = await LocalCardSyncService.probeRouter(router: router);
+
+      expect(result['success'], isTrue);
+      expect(removeCommands, isNotEmpty);
+      expect(removeCommands[0], contains('=.numbers=*99B'));
+    });
   });
 }

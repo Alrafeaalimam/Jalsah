@@ -837,11 +837,21 @@ class RouterOsBinaryClient {
     return true;
   }
 
+  /// Checks whether [id] matches the standard RouterOS internal item ID pattern (* followed by hex digits).
+  static bool isValidRouterOsId(String? id) {
+    if (id == null) return false;
+    final clean = id.trim();
+    if (clean.isEmpty) return false;
+    return RegExp(r'^\*[0-9a-fA-F]+$').hasMatch(clean);
+  }
+
   /// Deletes/removes a HotSpot user by its internal ID directly from the router (/ip/hotspot/user/remove).
-  /// Uses `=.numbers=$id` as per RouterOS API removal convention, with fallback to `=.id=$id`.
+  /// Enforces valid RouterOS ID format (* followed by hex digits) and executes no commands if ID is empty or invalid.
+  /// Uses `=.numbers=$id` as per RouterOS API removal convention.
+  /// Only attempts an alternative parameter format if the first attempt returns an "unknown parameter" trap (and never on "no such item").
   Future<bool> removeHotspotUserById(String id) async {
-    if (id.trim().isEmpty) return false;
     final cleanId = id.trim();
+    if (!isValidRouterOsId(cleanId)) return false;
     try {
       await executeCommand([
         '/ip/hotspot/user/remove',
@@ -853,19 +863,23 @@ class RouterOsBinaryClient {
       if (err.contains('no such item')) {
         return false;
       }
-      try {
-        await executeCommand([
-          '/ip/hotspot/user/remove',
-          '=.id=$cleanId',
-        ]);
-        return true;
-      } catch (e2) {
-        final err2 = e2.toString().toLowerCase();
-        if (err2.contains('no such item')) {
-          return false;
+      // ONLY try fallback format if error specifically indicates unknown parameter
+      if (err.contains('unknown parameter')) {
+        try {
+          await executeCommand([
+            '/ip/hotspot/user/remove',
+            '=.id=$cleanId',
+          ]);
+          return true;
+        } catch (e2) {
+          final err2 = e2.toString().toLowerCase();
+          if (err2.contains('no such item')) {
+            return false;
+          }
+          rethrow;
         }
-        rethrow;
       }
+      rethrow;
     }
   }
 

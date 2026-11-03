@@ -408,7 +408,8 @@ class LocalCardSyncService {
           debugPrint('[probeRouter] تنبيه أثناء قراءة فلتر المستخدمين في خطوة التحقق: $e');
         }
 
-        final bool verifiedByAddRet = probeUserId != null && probeUserId.isNotEmpty;
+        final bool verifiedByAddRet = probeUserId != null &&
+            RouterOsBinaryClient.isValidRouterOsId(probeUserId);
 
         if (!verifiedByFilter && !verifiedByAddRet) {
           throw Exception('فشل التحقق من إضافة المستخدم التجريبي داخل الراوتر.');
@@ -423,7 +424,7 @@ class LocalCardSyncService {
         lastFailedStep = 'الحذف';
         currentStep = 'الحذف';
         try {
-          if (probeUserId != null && probeUserId.isNotEmpty) {
+          if (probeUserId != null && RouterOsBinaryClient.isValidRouterOsId(probeUserId)) {
             await client.removeHotspotUserById(probeUserId);
             probeUserRemoved = true;
           } else {
@@ -553,7 +554,7 @@ class LocalCardSyncService {
         try {
           if (!probeUserRemoved) {
             final probeUserId = client.lastCreatedUserId;
-            if (probeUserId != null && probeUserId.isNotEmpty) {
+            if (probeUserId != null && RouterOsBinaryClient.isValidRouterOsId(probeUserId)) {
               await client.removeHotspotUserById(probeUserId);
             } else {
               await _safeRemoveProbeUser(client, probeUsername);
