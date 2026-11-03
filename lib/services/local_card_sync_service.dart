@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/card_model.dart';
+import '../models/package_model.dart';
 import '../models/router_model.dart';
 import 'mikrotik_discovery_service.dart';
 import 'routeros_binary_client.dart';
@@ -98,6 +99,192 @@ class LocalCardSyncService {
       useTls: useTls,
       timeout: timeout,
     );
+  }
+
+  /// Checks whether a specific HotSpot profile exists on the router.
+  static Future<Map<String, dynamic>> checkProfileExists({
+    required RouterModel router,
+    required String profileName,
+  }) async {
+    final creds = await MikrotikDiscoveryService.getRouterCredentials(router.id);
+    if (creds == null ||
+        creds['username'] == null ||
+        creds['username']!.isEmpty ||
+        creds['password'] == null) {
+      return {
+        'success': false,
+        'errorCode': 'NO_LOCAL_CREDENTIALS',
+        'errorMessage': 'بيانات دخول الراوتر المحلي غير محفوظة على هذا الجهاز.',
+      };
+    }
+
+    final useTls = router.apiPort != 8728 &&
+        (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
+    final client = _createClient(
+      host: router.host,
+      port: router.apiPort,
+      useTls: useTls,
+      timeout: const Duration(seconds: 10),
+    );
+
+    try {
+      await client.connect();
+      await client.login(creds['username']!, creds['password']!);
+      final profiles = await client.getHotspotUserProfiles(name: profileName);
+      final exists = profiles.any((p) => p['name'] == profileName);
+      Map<String, dynamic>? matchedProfile;
+      for (final p in profiles) {
+        if (p['name'] == profileName) {
+          matchedProfile = p;
+          break;
+        }
+      }
+      return {
+        'success': true,
+        'exists': exists,
+        'profile': matchedProfile,
+      };
+    } on AuthException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_CREDENTIALS',
+        'errorMessage': 'فشلت المصادقة مع الراوتر: ${e.message}',
+      };
+    } on SocketException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'PORT_CLOSED',
+        'errorMessage': 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): ${e.message}',
+      };
+    } on TimeoutException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة استجابة الراوتر أثناء التحقق من وجود البروفايل: ${e.message}',
+      };
+    } on RouterOsTrapException catch (e) {
+      return {
+        'success': false,
+        'errorCode': e.isPermission ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': 'فشل فحص البروفايلات في الراوتر: ${e.message}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'CHECK_FAILED',
+        'errorMessage': 'تعذر التحقق من بروفايل الراوتر: $e',
+      };
+    } finally {
+      try {
+        await client.close();
+      } catch (_) {}
+    }
+  }
+
+  /// Creates an automatic HotSpot profile on the router and verifies it immediately.
+  /// Strictly uses `/ip/hotspot/user/profile/add`; never modifies or deletes any profile.
+  static Future<Map<String, dynamic>> createAndVerifyProfile({
+    required RouterModel router,
+    required PackageModel package,
+  }) async {
+    final validationErr = package.validateAutoProfileSpeeds();
+    if (validationErr != null) {
+      return {
+        'success': false,
+        'errorCode': 'INVALID_PACKAGE_SPEED',
+        'errorMessage': validationErr,
+      };
+    }
+
+    final creds = await MikrotikDiscoveryService.getRouterCredentials(router.id);
+    if (creds == null ||
+        creds['username'] == null ||
+        creds['username']!.isEmpty ||
+        creds['password'] == null) {
+      return {
+        'success': false,
+        'errorCode': 'NO_LOCAL_CREDENTIALS',
+        'errorMessage': 'بيانات دخول الراوتر المحلي غير محفوظة على هذا الجهاز.',
+      };
+    }
+
+    final autoProfileName = package.automaticProfileName;
+    final rateLimit = '${package.uploadSpeedLimit.trim()}/${package.downloadSpeedLimit.trim()}';
+    final sharedUsers = package.simultaneousSessions > 0 ? package.simultaneousSessions : 1;
+
+    final useTls = router.apiPort != 8728 &&
+        (router.apiPort == 8729 || router.connectionMethod == 'ROUTEROS_API_SSL');
+    final client = _createClient(
+      host: router.host,
+      port: router.apiPort,
+      useTls: useTls,
+      timeout: const Duration(seconds: 10),
+    );
+
+    try {
+      await client.connect();
+      await client.login(creds['username']!, creds['password']!);
+
+      // 1. Add Profile
+      await client.createHotspotUserProfile(
+        name: autoProfileName,
+        rateLimit: rateLimit,
+        sharedUsers: sharedUsers,
+        statusAutorefresh: '1m',
+      );
+
+      // 2. Requirement 4: Verify by reading profile (?name=...)
+      final verifyProfiles = await client.getHotspotUserProfiles(name: autoProfileName);
+      final isVerified = verifyProfiles.any((p) => p['name'] == autoProfileName);
+
+      if (!isVerified) {
+        return {
+          'success': false,
+          'errorCode': 'VERIFICATION_FAILED',
+          'errorMessage': 'فشل التحقق من إضافة بروفايل الهوتسبوت ($autoProfileName) على الراوتر بعد إنشائه.',
+        };
+      }
+
+      return {
+        'success': true,
+        'profileName': autoProfileName,
+        'message': 'تم إنشاء بروفايل الهوتسبوت ($autoProfileName) والتحقق منه بنجاح.',
+      };
+    } on RouterOsTrapException catch (e) {
+      final isPerm = e.isPermission ||
+          e.message.toLowerCase().contains('permission') ||
+          e.message.toLowerCase().contains('not enough');
+      final msg = isPerm
+          ? 'فشل إنشاء البروفايل: حساب الدخول للراوتر لا يملك صلاحية الكتابة الكافية (مطلوب write policy في /user للراوتر).'
+          : 'فشل إنشاء البروفايل على الراوتر: ${e.message}';
+      return {
+        'success': false,
+        'errorCode': isPerm ? 'PERMISSION_DENIED' : 'ROUTEROS_TRAP',
+        'errorMessage': msg,
+      };
+    } on SocketException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'PORT_CLOSED',
+        'errorMessage': 'انقطع الاتصال بالراوتر أثناء إنشاء البروفايل: ${e.message}',
+      };
+    } on TimeoutException catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'TIMEOUT',
+        'errorMessage': 'انتهت مهلة استجابة الراوتر أثناء إنشاء بروفايل الهوتسبوت: ${e.message}',
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'errorCode': 'CREATE_PROFILE_FAILED',
+        'errorMessage': 'تعذر إنشاء بروفايل الهوتسبوت على الراوتر: $e',
+      };
+    } finally {
+      try {
+        await client.close();
+      } catch (_) {}
+    }
   }
 
   /// Probes the local router using a temporary user (_jalsah_probe_test)
@@ -284,7 +471,21 @@ class LocalCardSyncService {
         };
       } catch (e) {
         final errStr = e.toString().toLowerCase();
-        if (errStr.contains('profile') && errStr.contains('not found')) {
+        if ((errStr.contains('profile') && (errStr.contains('not found') || errStr.contains('invalid') || errStr.contains('input does not match'))) ||
+            errStr.contains('input does not match any value of profile')) {
+          String suggestion = '';
+          try {
+            final allProfiles = await client.getHotspotUserProfiles();
+            for (final p in allProfiles) {
+              final name = p['name']?.toString();
+              if (name != null &&
+                  name.toLowerCase() == (profile ?? '').toLowerCase() &&
+                  name != profile) {
+                suggestion = ' هل تقصد ($name)؟';
+                break;
+              }
+            }
+          } catch (_) {}
           return {
             'success': false,
             'errorCode': 'PROFILE_NOT_FOUND',
@@ -293,7 +494,7 @@ class LocalCardSyncService {
               step: currentStep,
               port: router.apiPort,
               useTls: useTls,
-              detail: 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.',
+              detail: 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.$suggestion',
             ),
           };
         }
@@ -377,11 +578,15 @@ class LocalCardSyncService {
     }
 
     final lower = msg.toLowerCase();
-    if (lower.contains('profile') && lower.contains('not found')) {
+    if (lower.contains('input does not match any value of profile') ||
+        (lower.contains('profile') && (lower.contains('not found') || lower.contains('invalid')))) {
       return 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.';
     }
     if (lower.contains('already have user with this name') || lower.contains('already have user')) {
       return 'المستخدم التجريبي موجود مسبقاً في الراوتر وتعذر تجاوزه.';
+    }
+    if (lower.contains('already have')) {
+      return 'العنصر موجود مسبقاً في إعدادات الراوتر (failure: already have).';
     }
     if (lower.contains('permission denied') || lower.contains('not enough permissions')) {
       return 'حساب الدخول للراوتر لا يملك صلاحية إضافة مستخدمين (مطلوب صلاحية write على الأقل).';
@@ -393,7 +598,7 @@ class LocalCardSyncService {
       return 'تعذر إزالة المستخدم التجريبي من إعدادات الراوتر.';
     }
     if (lower.contains('no such item')) {
-      return 'العنصر المطلوب غير موجود في إعدادات الراوتر.';
+      return 'العنصر المطلوب غير موجود في إعدادات الراوتر (no such item).';
     }
 
     return msg;

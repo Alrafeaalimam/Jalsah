@@ -50,6 +50,9 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       TextEditingController(text: '6');
   final TextEditingController _passwordLengthController =
       TextEditingController(text: '4');
+  final TextEditingController _manualProfileController =
+      TextEditingController();
+  String? _lastTargetProfile;
 
   bool _showAdvancedSettings = false;
   bool _isGenerating = false;
@@ -141,7 +144,65 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     _prefixController.dispose();
     _userLengthController.dispose();
     _passwordLengthController.dispose();
+    _manualProfileController.dispose();
     super.dispose();
+  }
+
+  Future<bool> _showAutoProfileConfirmDialog({
+    required String profileName,
+    required String downloadSpeed,
+    required String uploadSpeed,
+    required int sharedUsers,
+  }) async {
+    final sharedText = sharedUsers == 1 ? 'وجهاز واحد متزامن' : '$sharedUsers أجهزة متزامنة';
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: AppColors.pageBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.tune_rounded, color: AppColors.heroGradientStart, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'إعداد بروفايل الباقة على الراوتر',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'يحتاج التطبيق إلى إنشاء بروفايل هوتسبوت خاص بهذه الباقة على راوترك باسم:\n$profileName\nبمحدد سرعة: تحميل $downloadSpeed / رفع $uploadSpeed و$sharedText.\nلن يتم المساس بأي بروفايلات أخرى موجودة على الراوتر.',
+            style: GoogleFonts.cairo(fontSize: 13.5, height: 1.6),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(
+                'إلغاء',
+                style: GoogleFonts.cairo(color: AppColors.textMuted, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.heroGradientStart,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(
+                'موافق وإنشاء البروفايل',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    return result ?? false;
   }
 
   Future<void> _loadPackages() async {
@@ -253,6 +314,91 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     final isLocalRouter = _selectedRouter != null &&
         MikrotikDiscoveryService.isLocalPrivateIp(_selectedRouter!.host);
 
+    final manualProfile = _manualProfileController.text.trim();
+    final hasManualProfile = manualProfile.isNotEmpty;
+    final String targetProfile = hasManualProfile
+        ? manualProfile
+        : _selectedPackage!.automaticProfileName;
+
+    // 1. If local router and automatic profile: ensure package profile is ready before probe & generation
+    if (isLocalRouter && !hasManualProfile) {
+      final speedErr = _selectedPackage!.validateAutoProfileSpeeds();
+      if (speedErr != null) {
+        setState(() {
+          _generationError = speedErr;
+        });
+        return;
+      }
+
+      setState(() {
+        _isGenerating = true;
+        _generationError = null;
+        _syncResult = null;
+        _syncStatusMessage = 'جاري التحقق من بروفايل الباقة على الراوتر...';
+      });
+
+      final checkResult = await LocalCardSyncService.checkProfileExists(
+        router: _selectedRouter!,
+        profileName: targetProfile,
+      );
+
+      if (checkResult['success'] != true) {
+        if (!mounted) return;
+        setState(() {
+          _isGenerating = false;
+          _generationError = checkResult['errorMessage'] ??
+              'تعذر فحص بروفايل الراوتر قبل التوليد.';
+          _syncStatusMessage = null;
+        });
+        return;
+      }
+
+      final bool profileExists = checkResult['exists'] == true;
+      if (!profileExists) {
+        if (!mounted) return;
+        setState(() {
+          _isGenerating = false;
+          _syncStatusMessage = null;
+        });
+
+        final confirmed = await _showAutoProfileConfirmDialog(
+          profileName: targetProfile,
+          downloadSpeed: _selectedPackage!.downloadSpeedLimit,
+          uploadSpeed: _selectedPackage!.uploadSpeedLimit,
+          sharedUsers: _selectedPackage!.simultaneousSessions > 0
+              ? _selectedPackage!.simultaneousSessions
+              : 1,
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() {
+          _isGenerating = true;
+          _generationError = null;
+          _syncStatusMessage = 'جاري إنشاء بروفايل الباقة على الراوتر والتحقق منه...';
+        });
+
+        final createResult = await LocalCardSyncService.createAndVerifyProfile(
+          router: _selectedRouter!,
+          package: _selectedPackage!,
+        );
+
+        if (createResult['success'] != true) {
+          if (!mounted) return;
+          setState(() {
+            _isGenerating = false;
+            _generationError = createResult['errorMessage'] ??
+                'فشل إنشاء بروفايل الباقة على الراوتر.';
+            _syncStatusMessage = null;
+          });
+          return;
+        }
+      }
+    }
+
     setState(() {
       _isGenerating = true;
       _generationError = null;
@@ -262,11 +408,11 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
           : 'جارٍ توليد وتشفير الكروت بأمان...';
     });
 
-    // 1. If local router: Execute Pre-Flight Probe directly on device
+    // 2. If local router: Execute Pre-Flight Probe directly on device
     if (isLocalRouter) {
       final probeResult = await LocalCardSyncService.probeRouter(
         router: _selectedRouter!,
-        profile: _selectedPackage!.hotspotProfileName,
+        profile: targetProfile,
       );
 
       if (probeResult['success'] != true) {
@@ -287,7 +433,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       }
     }
 
-    // 2. Call backend to generate batch
+    // 3. Call backend to generate batch
     // For local routers, pass routerId: null so cloud backend saves cards without attempting direct router connection
     final result = await ApiClient.generateCardBatch(
       packageId: _selectedPackage!.id,
@@ -307,9 +453,10 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       final batch = result['data']['batch'] as CardBatchModel;
       final cards = result['data']['cards'] as List<CardModel>;
 
-      // 3. If local router, sync cards directly from device to router
+      // 4. If local router, sync cards directly from device to router
       BatchSyncResult? syncResult;
       if (isLocalRouter && cards.isNotEmpty) {
+        _lastTargetProfile = targetProfile;
         setState(() {
           _syncProgressCurrent = 0;
           _syncProgressTotal = cards.length;
@@ -319,7 +466,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         syncResult = await LocalCardSyncService.syncCardsToRouter(
           router: _selectedRouter!,
           cards: cards,
-          profile: _selectedPackage!.hotspotProfileName,
+          profile: targetProfile,
           comment: 'Jalsah:${batch.batchNumber}',
           timeLimit: _selectedPackage!.durationMinutes > 0
               ? '${_selectedPackage!.durationMinutes}m'
@@ -375,7 +522,10 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       final res = await LocalCardSyncService.resyncPendingCards(
         router: _selectedRouter!,
         cards: _generatedCards!,
-        profile: _selectedPackage?.hotspotProfileName,
+        profile: _lastTargetProfile ??
+            (_manualProfileController.text.trim().isNotEmpty
+                ? _manualProfileController.text.trim()
+                : _selectedPackage?.automaticProfileName),
         comment: _generatedBatch != null ? 'Jalsah:${_generatedBatch!.batchNumber}' : 'Jalsah:Card',
         timeLimit: (_selectedPackage?.durationMinutes ?? 0) > 0
             ? '${_selectedPackage!.durationMinutes}m'
@@ -1294,7 +1444,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  'إعدادات متقدمة لأطوال الحسابات وكلمات المرور',
+                  'إعدادات متقدمة (أطوال الحسابات والبروفايل)',
                   style: GoogleFonts.cairo(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
@@ -1345,6 +1495,33 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
               ],
             ),
           ],
+          const SizedBox(height: 14),
+          NeumorphicTextField(
+            label: 'استخدام بروفايل موجود يدوياً (اختياري)',
+            hintText: _selectedPackage != null
+                ? 'اتركه فارغاً للتلقائي (${_selectedPackage!.automaticProfileName})'
+                : 'اتركه فارغاً للاستخدام التلقائي',
+            controller: _manualProfileController,
+            enabled: !_isGenerating,
+            textDirection: TextDirection.ltr,
+            prefixIcon: const Icon(
+              Icons.tune_rounded,
+              color: AppColors.heroGradientStart,
+              size: 20,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              'اتركه فارغاً لإنشاء بروفايل تلقائي معزول للباقة (jalsah-*)، أو اكتب اسم بروفايل موجود مسبقاً في الراوتر لتجاوز الإنشاء التلقائي.',
+              style: GoogleFonts.cairo(
+                fontSize: 11,
+                color: AppColors.textMuted,
+                height: 1.4,
+              ),
+            ),
+          ),
         ],
 
         // Error message if generation failed

@@ -440,8 +440,9 @@ class RouterOsBinaryClient {
               trapMessage.toLowerCase().contains('denied') ||
               trapMessage.toLowerCase().contains('restricted');
           final prefix = isPermission ? 'رفض صلاحيات (trap)' : 'خطأ راوتر (trap)';
+          final translatedMsg = translateKnownRouterOsError(trapMessage);
           throw RouterOsTrapException(
-            '$prefix: $trapMessage (عدد الجمل المستلمة: $_commandSentencesReceived)',
+            '$prefix: $translatedMsg (عدد الجمل المستلمة: $_commandSentencesReceived)',
             isPermission: isPermission,
             category: trapCategory,
           );
@@ -568,6 +569,24 @@ class RouterOsBinaryClient {
     return message
         .replaceAll(RegExp(r'=password=[^\s,;)]+', caseSensitive: false), '=password=***')
         .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***');
+  }
+
+  /// Translates common RouterOS trap and error messages into friendly Arabic text.
+  static String translateKnownRouterOsError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('input does not match any value of profile')) {
+      return 'بروفايل الهوتسبوت المحدد غير موجود في إعدادات الراوتر (input does not match any value of profile)';
+    }
+    if (lower.contains('no such item')) {
+      return 'العنصر المطلوب غير موجود في إعدادات الراوتر (no such item)';
+    }
+    if (lower.contains('not enough permissions') || lower.contains('permission denied')) {
+      return 'حساب الدخول للراوتر لا يملك صلاحية الكتابة الكافية (مطلوب write policy في /user للراوتر - not enough permissions)';
+    }
+    if (lower.contains('already have')) {
+      return 'العنصر موجود مسبقاً في إعدادات الراوتر (failure: already have)';
+    }
+    return message;
   }
 
   /// Retrieves live HotSpot users directly from the router (/ip/hotspot/user/print).
@@ -770,6 +789,52 @@ class RouterOsBinaryClient {
     }
 
     return anyRemoved;
+  }
+
+  /// Retrieves HotSpot user profiles directly from the router (/ip/hotspot/user/profile/print).
+  /// If [name] is provided, queries RouterOS with `?name=...` to filter efficiently.
+  Future<List<Map<String, dynamic>>> getHotspotUserProfiles({String? name}) async {
+    final words = ['/ip/hotspot/user/profile/print'];
+    if (name != null && name.trim().isNotEmpty) {
+      words.add('?name=${name.trim()}');
+    }
+    words.add('=.proplist=.id,name,rate-limit,shared-users,status-autorefresh');
+
+    final records = await executeCommand(words);
+    return records.map((r) {
+      return {
+        '.id': r['.id'] ?? '',
+        'id': r['.id'] ?? '',
+        'name': r['name'] ?? '',
+        'rate-limit': r['rate-limit'] ?? '',
+        'rateLimit': r['rate-limit'] ?? '',
+        'shared-users': r['shared-users'] ?? '1',
+        'sharedUsers': int.tryParse(r['shared-users'] ?? '1') ?? 1,
+        'status-autorefresh': r['status-autorefresh'] ?? '',
+        'statusAutorefresh': r['status-autorefresh'] ?? '',
+      };
+    }).toList();
+  }
+
+  /// Creates a HotSpot user profile directly on the router (/ip/hotspot/user/profile/add).
+  /// Strictly only uses `/ip/hotspot/user/profile/add`; never uses `set` or modifies any profile.
+  Future<bool> createHotspotUserProfile({
+    required String name,
+    required String rateLimit,
+    int sharedUsers = 1,
+    String? statusAutorefresh = '1m',
+  }) async {
+    final words = [
+      '/ip/hotspot/user/profile/add',
+      '=name=$name',
+      '=rate-limit=$rateLimit',
+      '=shared-users=$sharedUsers',
+    ];
+    if (statusAutorefresh != null && statusAutorefresh.isNotEmpty) {
+      words.add('=status-autorefresh=$statusAutorefresh');
+    }
+    await executeCommand(words);
+    return true;
   }
 
   /// Parses MikroTik uptime format (e.g. "3w2d1h45m12s" or "1d04:12:30" or "02:14:35") into seconds.

@@ -80,6 +80,39 @@ class PackageModel {
 
   String get formattedSpeed => '$downloadSpeedLimit / $uploadSpeedLimit';
 
+  /// Generates the deterministic automatic profile name purely from settings:
+  /// `jalsah-d{download}-u{upload}-s{shared}`
+  /// Lowercase latin letters, digits, and hyphens only.
+  String get automaticProfileName {
+    final dl = downloadSpeedLimit.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final ul = uploadSpeedLimit.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final shared = simultaneousSessions > 0 ? simultaneousSessions : 1;
+    return 'jalsah-d$dl-u$ul-s$shared';
+  }
+
+  /// Generates the canonical profile name from standalone settings.
+  static String generateProfileName({
+    required String downloadSpeed,
+    required String uploadSpeed,
+    int simultaneousSessions = 1,
+  }) {
+    final dl = downloadSpeed.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final ul = uploadSpeed.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final shared = simultaneousSessions > 0 ? simultaneousSessions : 1;
+    return 'jalsah-d$dl-u$ul-s$shared';
+  }
+
+  /// Validates whether speeds are sufficiently defined for auto-profile creation.
+  String? validateAutoProfileSpeeds() {
+    if (downloadSpeedLimit.trim().isEmpty) {
+      return 'الباقة غير مكتملة: سرعة التحميل (Download) غير محددة.';
+    }
+    if (uploadSpeedLimit.trim().isEmpty) {
+      return 'الباقة غير مكتملة: سرعة الرفع (Upload) غير محددة. يرجى تعديل الباقة وإدخال سرعة الرفع لتمكين الإعداد التلقائي.';
+    }
+    return null;
+  }
+
   String get formattedDuration {
     if (durationMinutes >= 1440 && durationMinutes % 1440 == 0) {
       final days = durationMinutes ~/ 1440;
