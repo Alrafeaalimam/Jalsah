@@ -362,11 +362,18 @@ void main() {
       expect(result['errorMessage'].contains(secretPassword), isFalse);
     });
 
-    test('6. Fails at step "الحذف" with Arabic diagnostic info', () async {
+    test('6. Fails at step "الحذف" with Arabic diagnostic info when leftover deletion fails', () async {
       mockClient = DiagnosticMockRouterOsClient(
         host: testRouter.host,
         port: testRouter.apiPort,
-      )..failDeleteUser = true;
+      )
+        ..routerUsers.add({
+          '.id': '*leftover',
+          'name': '_jalsah_probe_test',
+          'password': '',
+          'profile': 'default',
+        })
+        ..failDeleteUser = true;
 
       final result = await LocalCardSyncService.probeRouter(router: testRouter);
 

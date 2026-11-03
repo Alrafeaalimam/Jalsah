@@ -311,6 +311,7 @@ class LocalCardSyncService {
 
     // Probe with at most 1 retry upon timeout before failing
     String lastFailedStep = 'الاتصال';
+    String? lastDiagnostics;
     for (int attempt = 1; attempt <= 2; attempt++) {
       // Port 8728 is unencrypted RouterOS API: never use TLS with it.
       final useTls = router.apiPort != 8728 &&
@@ -324,6 +325,7 @@ class LocalCardSyncService {
 
       const probeUsername = '_jalsah_probe_test';
       String currentStep = 'الاتصال';
+      bool probeUserRemoved = false;
 
       try {
         lastFailedStep = 'الاتصال';
@@ -340,7 +342,7 @@ class LocalCardSyncService {
         currentStep = 'قراءة المستخدمين';
         try {
           final existingUsers = await client.getHotspotUsers(name: probeUsername);
-          final hasLeftoverProbe = existingUsers.any((u) => u['name'] == probeUsername);
+          final hasLeftoverProbe = existingUsers.any((u) => (u['username'] ?? u['name']) == probeUsername);
           if (hasLeftoverProbe) {
             lastFailedStep = 'الحذف';
             currentStep = 'الحذف';
@@ -390,26 +392,54 @@ class LocalCardSyncService {
           }
         }
 
-        // 3. Verify user was created via /ip/hotspot/user/print with name filter
+        // 3. Verify user was created via /ip/hotspot/user/print with name filter or add !done ret ID
         lastFailedStep = 'التحقق';
         currentStep = 'التحقق';
-        final existingUsers = await client.getHotspotUsers(name: probeUsername);
-        final exists = existingUsers.any((u) => u['name'] == probeUsername);
+        final probeUserId = client.lastCreatedUserId;
+        bool verifiedByFilter = false;
 
-        if (!exists) {
+        try {
+          final existingUsers = await client.getHotspotUsers(name: probeUsername);
+          verifiedByFilter = existingUsers.any((u) => (u['username'] ?? u['name']) == probeUsername);
+        } catch (e) {
+          if (e is SocketException || e is TimeoutException) {
+            rethrow;
+          }
+          debugPrint('[probeRouter] تنبيه أثناء قراءة فلتر المستخدمين في خطوة التحقق: $e');
+        }
+
+        final bool verifiedByAddRet = probeUserId != null && probeUserId.isNotEmpty;
+
+        if (!verifiedByFilter && !verifiedByAddRet) {
           throw Exception('فشل التحقق من إضافة المستخدم التجريبي داخل الراوتر.');
         }
 
-        // 4. Safely delete the probe user upon successful verification
+        if (!verifiedByFilter && verifiedByAddRet) {
+          debugPrint('[probeRouter] لم يظهر المستخدم التجريبي في قراءة الفلتر، الاعتماد على نجاح أمر add بالـID ($probeUserId).');
+        }
+
+        // 4. Safely delete the probe user upon successful verification (by ID or name fallback)
+        // Failure to delete does NOT fail the probe, logged only.
         lastFailedStep = 'الحذف';
         currentStep = 'الحذف';
-        await _safeRemoveProbeUser(client, probeUsername);
+        try {
+          if (probeUserId != null && probeUserId.isNotEmpty) {
+            await client.removeHotspotUserById(probeUserId);
+            probeUserRemoved = true;
+          } else {
+            await _safeRemoveProbeUser(client, probeUsername);
+            probeUserRemoved = true;
+          }
+        } catch (e) {
+          debugPrint('[probeRouter] فشل حذف المستخدم التجريبي (لا يفشل الفحص): $e');
+        }
 
         return {
           'success': true,
           'message': 'تم التحقق من جاهزية الراوتر لإنشاء بطاقات الهوتسبوت بنجاح.',
         };
       } on TimeoutException catch (e) {
+        lastDiagnostics = client.getSentenceDiagnostics();
         if (attempt == 1) {
           // Retry once on timeout
           continue;
@@ -429,9 +459,11 @@ class LocalCardSyncService {
             port: router.apiPort,
             useTls: useTls,
             detail: timeoutDetail,
+            diagnostics: lastDiagnostics,
           ),
         };
       } on AuthException catch (e) {
+        lastDiagnostics = client.getSentenceDiagnostics();
         var msg = e.message;
         if (msg.toLowerCase().contains('invalid user name or password')) {
           msg = 'اسم المستخدم أو كلمة المرور غير صحيحة';
@@ -445,9 +477,11 @@ class LocalCardSyncService {
             port: router.apiPort,
             useTls: useTls,
             detail: 'فشلت المصادقة مع الراوتر: $msg',
+            diagnostics: lastDiagnostics,
           ),
         };
       } on SocketException catch (e) {
+        lastDiagnostics = client.getSentenceDiagnostics();
         final detail = e.osError?.message ?? e.message;
         String arabicDetail = detail;
         final lower = detail.toLowerCase();
@@ -467,9 +501,11 @@ class LocalCardSyncService {
             port: router.apiPort,
             useTls: useTls,
             detail: 'تعذر الاتصال بمنفذ الراوتر (${router.host}:${router.apiPort}): $arabicDetail',
+            diagnostics: lastDiagnostics,
           ),
         };
       } catch (e) {
+        lastDiagnostics = client.getSentenceDiagnostics();
         final errStr = e.toString().toLowerCase();
         if ((errStr.contains('profile') && (errStr.contains('not found') || errStr.contains('invalid') || errStr.contains('input does not match'))) ||
             errStr.contains('input does not match any value of profile')) {
@@ -495,6 +531,7 @@ class LocalCardSyncService {
               port: router.apiPort,
               useTls: useTls,
               detail: 'بروفايل الهوتسبوت المحدد (${profile ?? "default"}) غير موجود في إعدادات الراوتر.$suggestion',
+              diagnostics: lastDiagnostics,
             ),
           };
         }
@@ -507,13 +544,21 @@ class LocalCardSyncService {
             port: router.apiPort,
             useTls: useTls,
             detail: _cleanErrorMessage(e, profile: profile),
+            diagnostics: lastDiagnostics,
           ),
         };
       } finally {
         // 5. Always execute deletion in finally even if verification fails or connection dropped,
         // and ignore "no such item" or connection errors during cleanup.
         try {
-          await _safeRemoveProbeUser(client, probeUsername);
+          if (!probeUserRemoved) {
+            final probeUserId = client.lastCreatedUserId;
+            if (probeUserId != null && probeUserId.isNotEmpty) {
+              await client.removeHotspotUserById(probeUserId);
+            } else {
+              await _safeRemoveProbeUser(client, probeUsername);
+            }
+          }
         } catch (_) {}
         try {
           await client.close();
@@ -532,6 +577,7 @@ class LocalCardSyncService {
         port: router.apiPort,
         useTls: finalUseTls,
         detail: 'انتهت مهلة استجابة الراوتر بعد انتظار 10 ثوانٍ: لا رد (لم يتم استلام أي جملة)',
+        diagnostics: lastDiagnostics,
       ),
     };
   }
@@ -605,23 +651,30 @@ class LocalCardSyncService {
   }
 
   /// Formats diagnostic error messages indicating the failing step, port,
-  /// connection type (مشفر / غير مشفر), and detailed reason without passwords.
+  /// connection type (مشفر / غير مشفر), and detailed reason without passwords or usernames.
   static String _buildDiagnosticErrorMessage({
     required String step,
     required int port,
     required bool useTls,
     required String detail,
+    String? diagnostics,
   }) {
     final connType = useTls ? 'مشفر' : 'غير مشفر';
     final sanitizedDetail = _sanitizeErrorMessage(detail);
-    return 'فشل الفحص المسبق عند خطوة ($step) عبر المنفذ $port ($connType): $sanitizedDetail';
+    final diagSuffix = (diagnostics != null && diagnostics.trim().isNotEmpty)
+        ? ' [${diagnostics.trim()}]'
+        : '';
+    return 'فشل الفحص المسبق عند خطوة ($step) عبر المنفذ $port ($connType): $sanitizedDetail$diagSuffix';
   }
 
-  /// Strips any passwords or raw credentials from error strings.
+  /// Strips any passwords, raw credentials, or probe user names from error strings.
   static String _sanitizeErrorMessage(String message) {
     return message
         .replaceAll(RegExp(r'=password=[^\s,;)]+', caseSensitive: false), '=password=***')
-        .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***');
+        .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***')
+        .replaceAll(RegExp(r'=name=[^\s,;)]+', caseSensitive: false), '=name=***')
+        .replaceAll(RegExp(r'name[:=]\s*[^\s,;)]+', caseSensitive: false), 'name=***')
+        .replaceAll('_jalsah_probe_test', '***');
   }
 
   /// Syncs an entire batch of cards directly to the local router on device.

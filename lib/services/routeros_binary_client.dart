@@ -44,7 +44,19 @@ class RouterOsBinaryClient {
   Completer<List<String>>? _pendingSentenceCompleter;
   Timer? _sentenceTimer;
   int _commandSentencesReceived = 0;
+  final Map<String, int> _commandSentenceTypes = {};
+  String? _firstTrapMessage;
+  String? _lastDoneRet;
+  String? _lastCreatedUserId;
+  final Map<String, String> _lastDoneAttributes = {};
   bool _isSocketClosed = false;
+
+  int get commandSentencesReceived => _commandSentencesReceived;
+  Map<String, int> get commandSentenceTypes => Map.unmodifiable(_commandSentenceTypes);
+  String? get firstTrapMessage => _firstTrapMessage;
+  String? get lastDoneRet => _lastDoneRet;
+  String? get lastCreatedUserId => _lastCreatedUserId ?? _lastDoneRet;
+  Map<String, String> get lastDoneAttributes => Map.unmodifiable(_lastDoneAttributes);
 
   RouterOsBinaryClient({
     required this.host,
@@ -160,6 +172,7 @@ class RouterOsBinaryClient {
         _sentenceTimer?.cancel();
         _sentenceTimer = null;
         _commandSentencesReceived++;
+        _recordSentenceReceived(sentence);
         final completer = _pendingSentenceCompleter!;
         _pendingSentenceCompleter = null;
         completer.complete(sentence);
@@ -268,12 +281,32 @@ class RouterOsBinaryClient {
     return null;
   }
 
+  void _recordSentenceReceived(List<String> sentence) {
+    if (sentence.isNotEmpty) {
+      final type = sentence[0];
+      _commandSentenceTypes[type] = (_commandSentenceTypes[type] ?? 0) + 1;
+      if (type == '!trap' && _firstTrapMessage == null) {
+        String? msg;
+        for (int i = 1; i < sentence.length; i++) {
+          if (sentence[i].startsWith('=message=')) {
+            msg = sentence[i].substring(9);
+            break;
+          }
+        }
+        if (msg != null) {
+          _firstTrapMessage = translateKnownRouterOsError(msg);
+        }
+      }
+    }
+  }
+
   /// Reads one sentence from the socket byte stream.
   Future<List<String>> readSentence() async {
     // 1. If buffer already has a complete sentence, return it immediately without waiting.
     final cachedSentence = _extractSentenceFromBuffer();
     if (cachedSentence != null) {
       _commandSentencesReceived++;
+      _recordSentenceReceived(cachedSentence);
       return cachedSentence;
     }
 
@@ -310,6 +343,10 @@ class RouterOsBinaryClient {
   /// Performs authentication with MikroTik RouterOS (v6.43+, v7, and older challenge-response fallback).
   Future<void> login(String username, String password) async {
     _commandSentencesReceived = 0;
+    _commandSentenceTypes.clear();
+    _firstTrapMessage = null;
+    _lastDoneRet = null;
+    _lastDoneAttributes.clear();
     // 1. Try modern plain login (/login with =name= and =password=)
     await writeSentence(['/login', '=name=$username', '=password=$password']);
     final response = await readSentence();
@@ -398,6 +435,10 @@ class RouterOsBinaryClient {
   /// Executes a RouterOS command and collects all `!re` reply sentences until `!done`.
   Future<List<Map<String, String>>> executeCommand(List<String> commandWords) async {
     _commandSentencesReceived = 0;
+    _commandSentenceTypes.clear();
+    _firstTrapMessage = null;
+    _lastDoneRet = null;
+    _lastDoneAttributes.clear();
     await writeSentence(commandWords);
     final List<Map<String, String>> records = [];
     String? trapMessage;
@@ -433,6 +474,25 @@ class RouterOsBinaryClient {
       final replyType = sentence[0];
 
       if (replyType == '!done') {
+        _lastDoneAttributes.clear();
+        for (int i = 1; i < sentence.length; i++) {
+          final word = sentence[i];
+          if (word.startsWith('=')) {
+            final eqIndex = word.indexOf('=', 1);
+            if (eqIndex != -1) {
+              final key = word.substring(1, eqIndex);
+              final value = word.substring(eqIndex + 1);
+              _lastDoneAttributes[key] = value;
+            } else {
+              _lastDoneAttributes[word.substring(1)] = '';
+            }
+          }
+        }
+        _lastDoneRet = _lastDoneAttributes['ret'] ?? _lastDoneAttributes['.ret'];
+        if (_lastDoneRet != null) {
+          _lastCreatedUserId = _lastDoneRet;
+        }
+
         if (trapMessage != null) {
           final isPermission = trapCategory == '2' ||
               trapMessage.toLowerCase().contains('permission') ||
@@ -483,6 +543,7 @@ class RouterOsBinaryClient {
         }
         trapMessage = msg;
         trapCategory = cat;
+        _firstTrapMessage ??= translateKnownRouterOsError(msg);
         // Continue loop to receive the terminating !done sentence if sent.
       } else if (replyType == '!fatal') {
         String fatalMsg = 'تم إنهاء الجلسة بواسطة الراوتر';
@@ -589,6 +650,32 @@ class RouterOsBinaryClient {
     return message;
   }
 
+  /// Returns safe, sanitized diagnostics about sentences received during the last command,
+  /// including sentence count, received sentence types (!re/!done/!trap/!empty), and first trap message.
+  /// Strictly avoids exposing any usernames or passwords.
+  String getSentenceDiagnostics() {
+    final parts = <String>[];
+    parts.add('عدد الجمل: $_commandSentencesReceived');
+    if (_commandSentenceTypes.isNotEmpty) {
+      final typesList = _commandSentenceTypes.entries.map((e) => '${e.key}: ${e.value}').join(', ');
+      parts.add('الأنواع: ($typesList)');
+    }
+    if (_firstTrapMessage != null && _firstTrapMessage!.isNotEmpty) {
+      final sanitizedTrap = sanitizeDiagnostics(_firstTrapMessage!);
+      parts.add('أول trap: $sanitizedTrap');
+    }
+    return parts.join(' | ');
+  }
+
+  /// Sanitizes messages to strip passwords, credentials, and sensitive probe identifiers.
+  static String sanitizeDiagnostics(String text) {
+    return text
+        .replaceAll(RegExp(r'=password=[^\s,;)]+', caseSensitive: false), '=password=***')
+        .replaceAll(RegExp(r'password[:=]\s*[^\s,;)]+', caseSensitive: false), 'password=***')
+        .replaceAll(RegExp(r'=name=[^\s,;)]+', caseSensitive: false), '=name=***')
+        .replaceAll('_jalsah_probe_test', '***');
+  }
+
   /// Retrieves live HotSpot users directly from the router (/ip/hotspot/user/print).
   /// If [name] is provided, queries RouterOS with `?name=...` to avoid
   /// dumping large user databases during probes or specific lookups.
@@ -611,6 +698,7 @@ class RouterOsBinaryClient {
       return {
         'id': r['.id'] ?? '',
         'username': r['name'] ?? '',
+        'name': r['name'] ?? '',
         'profile': r['profile'] ?? 'default',
         'uptime': uptimeStr,
         'uptimeSeconds': uptimeSec,
@@ -745,7 +833,40 @@ class RouterOsBinaryClient {
     }
 
     await executeCommand(words);
+    _lastCreatedUserId = _lastDoneRet;
     return true;
+  }
+
+  /// Deletes/removes a HotSpot user by its internal ID directly from the router (/ip/hotspot/user/remove).
+  /// Uses `=.numbers=$id` as per RouterOS API removal convention, with fallback to `=.id=$id`.
+  Future<bool> removeHotspotUserById(String id) async {
+    if (id.trim().isEmpty) return false;
+    final cleanId = id.trim();
+    try {
+      await executeCommand([
+        '/ip/hotspot/user/remove',
+        '=.numbers=$cleanId',
+      ]);
+      return true;
+    } catch (e) {
+      final err = e.toString().toLowerCase();
+      if (err.contains('no such item')) {
+        return false;
+      }
+      try {
+        await executeCommand([
+          '/ip/hotspot/user/remove',
+          '=.id=$cleanId',
+        ]);
+        return true;
+      } catch (e2) {
+        final err2 = e2.toString().toLowerCase();
+        if (err2.contains('no such item')) {
+          return false;
+        }
+        rethrow;
+      }
+    }
   }
 
   /// Deletes/removes a HotSpot user directly from the router (/ip/hotspot/user/remove).
