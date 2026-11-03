@@ -148,13 +148,38 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     super.dispose();
   }
 
+  Widget _buildDialogInfoRow(String label, String value, {bool isLtr = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.cairo(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textDark,
+          ),
+        ),
+        Text(
+          value,
+          textDirection: isLtr ? TextDirection.ltr : TextDirection.rtl,
+          style: GoogleFonts.cairo(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+            color: AppColors.heroGradientStart,
+          ),
+        ),
+      ],
+    );
+  }
+
   Future<bool> _showAutoProfileConfirmDialog({
     required String profileName,
     required String downloadSpeed,
     required String uploadSpeed,
     required int sharedUsers,
   }) async {
-    final sharedText = sharedUsers == 1 ? 'وجهاز واحد متزامن' : '$sharedUsers أجهزة متزامنة';
+    final sharedText = sharedUsers == 1 ? 'جهاز واحد (1)' : '$sharedUsers أجهزة متزامنة';
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -175,9 +200,40 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
               ),
             ],
           ),
-          content: Text(
-            'يحتاج التطبيق إلى إنشاء بروفايل هوتسبوت خاص بهذه الباقة على راوترك باسم:\n$profileName\nبمحدد سرعة: تحميل $downloadSpeed / رفع $uploadSpeed و$sharedText.\nلن يتم المساس بأي بروفايلات أخرى موجودة على الراوتر.',
-            style: GoogleFonts.cairo(fontSize: 13.5, height: 1.6),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'يحتاج التطبيق إلى إنشاء بروفايل هوتسبوت خاص بهذه الباقة على راوترك بالإعدادات التالية:',
+                style: GoogleFonts.cairo(fontSize: 13.5, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.cardSurfaceLight,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Column(
+                  children: [
+                    _buildDialogInfoRow('اسم البروفايل:', profileName, isLtr: true),
+                    const Divider(height: 12),
+                    _buildDialogInfoRow('سرعة التحميل (Download):', downloadSpeed, isLtr: true),
+                    const Divider(height: 12),
+                    _buildDialogInfoRow('سرعة الرفع (Upload):', uploadSpeed, isLtr: true),
+                    const Divider(height: 12),
+                    _buildDialogInfoRow('عدد الأجهزة المتزامنة:', sharedText, isLtr: false),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'لن يتم المساس بأي بروفايلات أخرى موجودة على الراوتر.',
+                style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textMuted),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -203,6 +259,98 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
       ),
     );
     return result ?? false;
+  }
+
+  Future<String?> _showLegacyProfileChoiceDialog({
+    required String legacyProfile,
+    required String autoProfile,
+  }) async {
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          backgroundColor: AppColors.pageBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.alt_route_rounded, color: AppColors.heroGradientStart, size: 24),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'اختيار بروفايل الهوتسبوت للباقة',
+                  style: GoogleFonts.cairo(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'تحتوي هذه الباقة على بروفايل مسجّل مسبقاً في إعداداتها، بينما يتوفر أيضاً البروفايل التلقائي المعزول الجديد:',
+                style: GoogleFonts.cairo(fontSize: 13.5, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.cardSurfaceLight,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.divider),
+                ),
+                child: Column(
+                  children: [
+                    _buildDialogInfoRow('البروفايل السابق:', legacyProfile, isLtr: true),
+                    const Divider(height: 12),
+                    _buildDialogInfoRow('البروفايل التلقائي الجديد:', autoProfile, isLtr: true),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'كيف ترغب في متابعة توليد الكروت؟',
+                style: GoogleFonts.cairo(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textDark),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: Text(
+                'إلغاء',
+                style: GoogleFonts.cairo(color: AppColors.textMuted, fontWeight: FontWeight.w700),
+              ),
+            ),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.heroGradientStart),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop('LEGACY'),
+              child: Text(
+                'استخدام السابق ($legacyProfile)',
+                style: GoogleFonts.cairo(color: AppColors.heroGradientStart, fontWeight: FontWeight.w700, fontSize: 11.5),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.heroGradientStart,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop('AUTO'),
+              child: Text(
+                'إنشاء تلقائي ($autoProfile)',
+                style: GoogleFonts.cairo(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 11.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    return result;
   }
 
   Future<void> _loadPackages() async {
@@ -316,12 +464,40 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
 
     final manualProfile = _manualProfileController.text.trim();
     final hasManualProfile = manualProfile.isNotEmpty;
-    final String targetProfile = hasManualProfile
+    final legacyProfile = _selectedPackage!.hotspotProfileName.trim();
+    final bool hasLegacyDifference = !hasManualProfile &&
+        legacyProfile.isNotEmpty &&
+        legacyProfile != _selectedPackage!.automaticProfileName;
+
+    String targetProfile = hasManualProfile
         ? manualProfile
         : _selectedPackage!.automaticProfileName;
 
+    bool isUsingLegacyExistingProfile = hasManualProfile;
+
+    // If local router and package has a legacy profile registered, ask user whether to use legacy or auto-profile
+    if (isLocalRouter && hasLegacyDifference) {
+      final choice = await _showLegacyProfileChoiceDialog(
+        legacyProfile: legacyProfile,
+        autoProfile: _selectedPackage!.automaticProfileName,
+      );
+
+      if (choice == null) {
+        // User cancelled dialog
+        return;
+      }
+
+      if (choice == 'LEGACY') {
+        targetProfile = legacyProfile;
+        isUsingLegacyExistingProfile = true;
+      } else {
+        targetProfile = _selectedPackage!.automaticProfileName;
+        isUsingLegacyExistingProfile = false;
+      }
+    }
+
     // 1. If local router and automatic profile: ensure package profile is ready before probe & generation
-    if (isLocalRouter && !hasManualProfile) {
+    if (isLocalRouter && !isUsingLegacyExistingProfile) {
       final speedErr = _selectedPackage!.validateAutoProfileSpeeds();
       if (speedErr != null) {
         setState(() {

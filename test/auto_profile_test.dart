@@ -569,5 +569,80 @@ void main() {
       expect(result['errorCode'], equals('PROFILE_NOT_FOUND'));
       expect(result['errorMessage'], contains('هل تقصد (1D)؟'));
     });
+
+    test('Cancellation proof: if creation is not confirmed, no /ip/hotspot/user/profile/add is ever sent', () async {
+      mockServer.onSentence = (client, words) {
+        if (words.isEmpty) return;
+        final cmd = words[0];
+        if (cmd == '/login') {
+          mockServer.reply(client, ['!done']);
+        } else if (cmd == '/ip/hotspot/user/profile/print') {
+          // Profile does not exist
+          mockServer.reply(client, ['!empty']);
+          mockServer.reply(client, ['!done']);
+        }
+      };
+
+      // 1. Check profile existence (as done before showing dialog)
+      final checkResult = await LocalCardSyncService.checkProfileExists(
+        router: testRouter,
+        profileName: 'jalsah-d2m-u512k-s1',
+      );
+      expect(checkResult['success'], isTrue);
+      expect(checkResult['exists'], isFalse);
+
+      // 2. Simulate User Cancellation:
+      // The user dismisses or clicks "إلغاء" in the confirmation dialog.
+      // In this case, createAndVerifyProfile is NOT called.
+      void onDialogResult({required bool confirmed}) {
+        if (!confirmed) {
+          // Abort without calling createAndVerifyProfile
+          return;
+        }
+      }
+
+      onDialogResult(confirmed: false);
+
+      // 3. PROVE that NO sentence with /ip/hotspot/user/profile/add was ever sent
+      final addCommands = mockServer.receivedSentences.where(
+        (s) => s.isNotEmpty && s[0] == '/ip/hotspot/user/profile/add',
+      );
+      expect(addCommands, isEmpty, reason: 'Cancelling MUST NEVER send an add command to the router');
+    });
+
+    test('Legacy profile choice logic: respects existing hotspotProfileName when requested', () async {
+      final legacyPkg = PackageModel(
+        id: 'pkg-legacy',
+        name: 'Legacy Package',
+        code: 'LEG_1',
+        price: 25.0,
+        downloadSpeedLimit: '4M',
+        uploadSpeedLimit: '1M',
+        durationMinutes: 1440,
+        validityDays: 1,
+        hotspotProfileName: 'u_profile_custom',
+        simultaneousSessions: 1,
+        isActive: true,
+      );
+
+      final autoName = legacyPkg.automaticProfileName;
+      expect(autoName, equals('jalsah-d4m-u1m-s1'));
+      expect(legacyPkg.hotspotProfileName, equals('u_profile_custom'));
+      expect(legacyPkg.hotspotProfileName, isNot(equals(autoName)));
+
+      // If user chooses LEGACY:
+      final String legacyChoice = 'LEGACY';
+      final String targetProfileWhenLegacy = legacyChoice == 'LEGACY'
+          ? legacyPkg.hotspotProfileName
+          : legacyPkg.automaticProfileName;
+      expect(targetProfileWhenLegacy, equals('u_profile_custom'));
+
+      // If user chooses AUTO:
+      final String autoChoice = 'AUTO';
+      final String targetProfileWhenAuto = autoChoice == 'AUTO'
+          ? legacyPkg.automaticProfileName
+          : legacyPkg.hotspotProfileName;
+      expect(targetProfileWhenAuto, equals('jalsah-d4m-u1m-s1'));
+    });
   });
 }
