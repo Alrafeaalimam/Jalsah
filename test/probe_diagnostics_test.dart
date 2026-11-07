@@ -97,6 +97,7 @@ class DiagnosticMockRouterOsClient extends RouterOsBinaryClient {
     required String profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
   }) async {
     if (throwTimeoutOnStep && stepToTimeout == 'createUser') {
       throw TimeoutException('Sentence response timeout while creating user');

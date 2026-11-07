@@ -113,6 +113,12 @@ class PackageModel {
     return null;
   }
 
+  /// معايير تحويل وحدات البيانات الثنائية:
+  /// 1GB = 1073741824 بايت (1024 * 1024 * 1024)
+  /// 1MB = 1048576 بايت (1024 * 1024)
+  static const int bytesPerMb = 1048576;
+  static const int bytesPerGb = 1073741824;
+
   String get formattedDuration {
     if (durationMinutes >= 1440 && durationMinutes % 1440 == 0) {
       final days = durationMinutes ~/ 1440;
@@ -122,6 +128,32 @@ class PackageModel {
       return '$hours ${hours == 1 ? "ساعة" : "ساعات"}';
     }
     return '$durationMinutes دقيقة';
+  }
+
+  /// التنسيق النصي لحد البيانات (مثال: "5 GB"، "500 MB"، أو "غير محدود" إذا لم يُحدد أو كان 0)
+  String get formattedDataLimit {
+    if (dataLimitBytes == null || dataLimitBytes! <= 0) {
+      return 'غير محدود';
+    }
+    final bytes = dataLimitBytes!;
+    if (bytes >= bytesPerGb) {
+      if (bytes % bytesPerGb == 0) {
+        return '${bytes ~/ bytesPerGb} GB';
+      } else {
+        final gb = bytes / bytesPerGb;
+        final formatted = gb.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+        return '$formatted GB';
+      }
+    } else if (bytes >= bytesPerMb) {
+      if (bytes % bytesPerMb == 0) {
+        return '${bytes ~/ bytesPerMb} MB';
+      } else {
+        final mb = bytes / bytesPerMb;
+        final formatted = mb.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+        return '$formatted MB';
+      }
+    }
+    return '$bytes B';
   }
 
   @override

@@ -818,6 +818,7 @@ class RouterOsBinaryClient {
     required String profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
   }) async {
     final words = [
       '/ip/hotspot/user/add',
@@ -830,6 +831,9 @@ class RouterOsBinaryClient {
     }
     if (timeLimit != null && timeLimit.isNotEmpty) {
       words.add('=limit-uptime=$timeLimit');
+    }
+    if (limitBytesTotal != null && limitBytesTotal > 0) {
+      words.add('=limit-bytes-total=$limitBytesTotal');
     }
 
     await executeCommand(words);

@@ -70,6 +70,7 @@ class FakeRouterOsBinaryClient extends RouterOsBinaryClient {
     required String profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
   }) async {
     if (shouldFailOnUser && username == failOnUsername) {
       throw const SocketException('Broken pipe mid-sync');
@@ -83,6 +84,8 @@ class FakeRouterOsBinaryClient extends RouterOsBinaryClient {
       'profile': profile,
       if (comment != null) 'comment': comment,
       if (timeLimit != null) 'limit-uptime': timeLimit,
+      if (limitBytesTotal != null && limitBytesTotal > 0)
+        'limit-bytes-total': limitBytesTotal.toString(),
     });
     return true;
   }

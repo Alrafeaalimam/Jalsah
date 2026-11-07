@@ -1128,6 +1128,7 @@ class _CardsListScreenState extends State<CardsListScreen> {
   Widget _buildCardItem(CardModel card) {
     final bool isAvailable = card.status.toUpperCase() == 'AVAILABLE';
     final bool isSelected = _selectedCardIds.contains(card.id);
+    final package = _packagesMap[card.packageId];
 
     return InkWell(
       onTap: isAvailable
@@ -1241,6 +1242,43 @@ class _CardsListScreenState extends State<CardsListScreen> {
                               fontSize: 11.5,
                               fontWeight: FontWeight.w700,
                               color: card.statusColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(width: 6),
+
+                    // Data Limit Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.heroGradientStart.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: AppColors.heroGradientStart.withValues(alpha: 0.2),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.data_usage_rounded,
+                            size: 13,
+                            color: AppColors.heroGradientStart,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            package?.formattedDataLimit ?? 'غير محدود',
+                            style: GoogleFonts.cairo(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.heroGradientStart,
                             ),
                           ),
                         ],

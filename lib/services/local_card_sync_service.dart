@@ -68,6 +68,7 @@ class LocalCardSyncService {
     String? profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
     void Function(int current, int total, String currentUsername)? onProgress,
   })? syncBatchTester;
 
@@ -686,6 +687,7 @@ class LocalCardSyncService {
     String? profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
     void Function(int current, int total, String currentUsername)? onProgress,
   }) async {
     if (syncBatchTester != null) {
@@ -695,6 +697,7 @@ class LocalCardSyncService {
         profile: profile,
         comment: comment,
         timeLimit: timeLimit,
+        limitBytesTotal: limitBytesTotal,
         onProgress: onProgress,
       );
     }
@@ -792,6 +795,7 @@ class LocalCardSyncService {
             profile: profile ?? 'default',
             comment: comment ?? (card.batchId != null ? 'Jalsah:${card.batchId}' : 'Jalsah:Card'),
             timeLimit: timeLimit,
+            limitBytesTotal: limitBytesTotal,
           );
 
           await saveCardSyncStatus(
@@ -881,6 +885,7 @@ class LocalCardSyncService {
     String? profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
     void Function(int current, int total, String currentUsername)? onProgress,
   }) async {
     final creds = await MikrotikDiscoveryService.getRouterCredentials(router.id);
@@ -957,6 +962,7 @@ class LocalCardSyncService {
             profile: profile ?? 'default',
             comment: comment ?? (card.batchId != null ? 'Jalsah:${card.batchId}' : 'Jalsah:Card'),
             timeLimit: timeLimit,
+            limitBytesTotal: limitBytesTotal,
           );
           await saveCardSyncStatus(
             cardId: card.id,

@@ -178,6 +178,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
     required String downloadSpeed,
     required String uploadSpeed,
     required int sharedUsers,
+    String? dataLimit,
   }) async {
     final sharedText = sharedUsers == 1 ? 'جهاز واحد (1)' : '$sharedUsers أجهزة متزامنة';
     final result = await showDialog<bool>(
@@ -223,6 +224,8 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                     _buildDialogInfoRow('سرعة التحميل (Download):', downloadSpeed, isLtr: true),
                     const Divider(height: 12),
                     _buildDialogInfoRow('سرعة الرفع (Upload):', uploadSpeed, isLtr: true),
+                    const Divider(height: 12),
+                    _buildDialogInfoRow('حد البيانات:', dataLimit ?? (_selectedPackage?.formattedDataLimit ?? 'غير محدود'), isLtr: false),
                     const Divider(height: 12),
                     _buildDialogInfoRow('عدد الأجهزة المتزامنة:', sharedText, isLtr: false),
                   ],
@@ -544,6 +547,7 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
           sharedUsers: _selectedPackage!.simultaneousSessions > 0
               ? _selectedPackage!.simultaneousSessions
               : 1,
+          dataLimit: _selectedPackage!.formattedDataLimit,
         );
 
         if (!confirmed) {
@@ -647,6 +651,10 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
           timeLimit: _selectedPackage!.durationMinutes > 0
               ? '${_selectedPackage!.durationMinutes}m'
               : null,
+          limitBytesTotal: (_selectedPackage?.dataLimitBytes != null &&
+                  _selectedPackage!.dataLimitBytes! > 0)
+              ? _selectedPackage!.dataLimitBytes
+              : null,
           onProgress: (current, total, username) {
             if (mounted) {
               setState(() {
@@ -705,6 +713,10 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
         comment: _generatedBatch != null ? 'Jalsah:${_generatedBatch!.batchNumber}' : 'Jalsah:Card',
         timeLimit: (_selectedPackage?.durationMinutes ?? 0) > 0
             ? '${_selectedPackage!.durationMinutes}m'
+            : null,
+        limitBytesTotal: (_selectedPackage?.dataLimitBytes != null &&
+                _selectedPackage!.dataLimitBytes! > 0)
+            ? _selectedPackage!.dataLimitBytes
             : null,
         onProgress: (current, total, username) {
           if (mounted) {
@@ -2179,6 +2191,25 @@ class _GenerateCardsScreenState extends State<GenerateCardsScreen> {
                     ],
                   ),
                 ),
+
+                // Data Limit Badge
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.heroGradientStart.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _selectedPackage?.formattedDataLimit ?? 'غير محدود',
+                    style: GoogleFonts.cairo(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.heroGradientStart,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
 
                 // Status Badge
                 Container(

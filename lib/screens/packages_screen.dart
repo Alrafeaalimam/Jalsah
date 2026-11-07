@@ -823,12 +823,11 @@ class _PackagesScreenState extends State<PackagesScreen> {
 
             const SizedBox(height: 12),
 
-            // Row 2: Speed Limits, Duration, Price
+            // Row 2: Speed Limits & Duration
             Row(
               children: [
                 // Speed Limit
                 Expanded(
-                  flex: 4,
                   child: Row(
                     children: [
                       Container(
@@ -874,9 +873,10 @@ class _PackagesScreenState extends State<PackagesScreen> {
                   ),
                 ),
 
+                const SizedBox(width: 8),
+
                 // Duration & Validity
                 Expanded(
-                  flex: 3,
                   child: Row(
                     children: [
                       Container(
@@ -921,10 +921,65 @@ class _PackagesScreenState extends State<PackagesScreen> {
                     ],
                   ),
                 ),
+              ],
+            ),
+
+            const SizedBox(height: 10),
+
+            // Row 3: Data Limit & Price
+            Row(
+              children: [
+                // Data Limit
+                Expanded(
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: AppColors.heroGradientStart
+                              .withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.data_usage_rounded,
+                          size: 16,
+                          color: AppColors.heroGradientStart,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'البيانات',
+                              style: GoogleFonts.cairo(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textMuted,
+                              ),
+                            ),
+                            Text(
+                              package.formattedDataLimit,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.cairo(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
 
                 // Price
                 Expanded(
-                  flex: 3,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -992,6 +1047,13 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
   final _priceController = TextEditingController();
   final _hotspotProfileController = TextEditingController();
 
+  // خيارات حجم البيانات (الافتراضي هو غير محدود)
+  bool _isUnlimitedData = true;
+  String _selectedDataUnit = 'GB'; // 'GB' أو 'MB'
+  final _dataLimitController = TextEditingController();
+  String? _dataLimitError;
+  int? _calculatedDataLimitBytes;
+
   String? _nameError;
   String? _codeError;
   String? _downloadSpeedError;
@@ -1012,6 +1074,7 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
     _uploadSpeedController.dispose();
     _durationMinutesController.dispose();
     _validityDaysController.dispose();
+    _dataLimitController.dispose();
     _priceController.dispose();
     _hotspotProfileController.dispose();
     super.dispose();
@@ -1026,6 +1089,8 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
       _uploadSpeedError = null;
       _durationMinutesError = null;
       _validityDaysError = null;
+      _dataLimitError = null;
+      _calculatedDataLimitBytes = null;
       _priceError = null;
       _hotspotProfileError = null;
       _serverErrorMessage = null;
@@ -1074,6 +1139,32 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
         isValid = false;
       }
 
+      // التحقق من حجم البيانات (Data Limit)
+      // الحساب المعتمد: 1GB = 1073741824 بايت، و1MB = 1048576 بايت
+      if (!_isUnlimitedData) {
+        final dataStr = _dataLimitController.text.trim();
+        final dataVal = double.tryParse(dataStr);
+        if (dataStr.isEmpty) {
+          _dataLimitError = 'يرجى إدخال حجم البيانات أو تفعيل خيار غير محدود';
+          isValid = false;
+        } else if (dataVal == null || dataVal <= 0) {
+          _dataLimitError = 'حجم البيانات يجب أن يكون رقماً موجباً';
+          isValid = false;
+        } else {
+          // التحويل للبايت بالوحدات الثنائية المعتمدة:
+          // 1GB = 1073741824 بايت و1MB = 1048576 بايت
+          final calculatedBytes = _selectedDataUnit == 'GB'
+              ? (dataVal * PackageModel.bytesPerGb).round()
+              : (dataVal * PackageModel.bytesPerMb).round();
+          if (calculatedBytes < PackageModel.bytesPerMb) {
+            _dataLimitError = 'الحد الأدنى لحجم البيانات هو 1 ميجابايت (1 MB)';
+            isValid = false;
+          } else {
+            _calculatedDataLimitBytes = calculatedBytes;
+          }
+        }
+      }
+
       final priceStr = _priceController.text.trim();
       final priceVal = double.tryParse(priceStr);
       if (priceStr.isEmpty) {
@@ -1113,6 +1204,7 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
       validityDays: int.parse(_validityDaysController.text.trim()),
       price: double.parse(_priceController.text.trim()),
       hotspotProfileName: _hotspotProfileController.text.trim(),
+      dataLimitBytes: _isUnlimitedData ? null : _calculatedDataLimitBytes,
     );
 
     if (!mounted) return;
@@ -1402,6 +1494,216 @@ class _AddPackageSheetState extends State<AddPackageSheet> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Data Limit Section (MB / GB / Unlimited)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardSurfaceLight,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _dataLimitError != null
+                            ? AppColors.statusOffline
+                            : AppColors.divider,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.data_usage_rounded,
+                                  color: AppColors.heroGradientStart,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'حجم البيانات',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textDark,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'غير محدود',
+                                  style: GoogleFonts.cairo(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: _isUnlimitedData
+                                        ? AppColors.heroGradientStart
+                                        : AppColors.textMuted,
+                                  ),
+                                ),
+                                Switch(
+                                  value: _isUnlimitedData,
+                                  activeThumbColor: AppColors.heroGradientStart,
+                                  onChanged: (val) {
+                                    setState(() {
+                                      _isUnlimitedData = val;
+                                      if (val) {
+                                        _dataLimitError = null;
+                                      }
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        if (!_isUnlimitedData) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: NeumorphicTextField(
+                                  label: 'القيمة',
+                                  hintText: _selectedDataUnit == 'GB'
+                                      ? 'مثال: 5'
+                                      : 'مثال: 500',
+                                  controller: _dataLimitController,
+                                  errorText: _dataLimitError,
+                                  keyboardType: const TextInputType
+                                      .numberWithOptions(decimal: true),
+                                  textDirection: TextDirection.ltr,
+                                  prefixIcon: const Icon(
+                                    Icons.cloud_download_outlined,
+                                    color: AppColors.textMuted,
+                                    size: 18,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'الوحدة',
+                                      style: GoogleFonts.cairo(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.textDark,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      height: 52,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.pageBg,
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                        border: Border.all(
+                                            color: AppColors.divider),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: InkWell(
+                                              onTap: () {
+                                                setState(() {
+                                                  _selectedDataUnit = 'GB';
+                                                });
+                                              },
+                                              borderRadius:
+                                                  const BorderRadius.horizontal(
+                                                right: Radius.circular(11),
+                                              ),
+                                              child: Container(
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: _selectedDataUnit ==
+                                                          'GB'
+                                                      ? AppColors
+                                                          .heroGradientStart
+                                                      : Colors.transparent,
+                                                  borderRadius:
+                                                      const BorderRadius
+                                                          .horizontal(
+                                                    right: Radius.circular(11),
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  'GB',
+                                                  style: GoogleFonts.cairo(
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w800,
+                                                    color: _selectedDataUnit ==
+                                                            'GB'
+                                                        ? Colors.white
+                                                        : AppColors.textMuted,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: InkWell(
+                                              onTap: () {
+                                                setState(() {
+                                                  _selectedDataUnit = 'MB';
+                                                });
+                                              },
+                                              borderRadius:
+                                                  const BorderRadius.horizontal(
+                                                left: Radius.circular(11),
+                                              ),
+                                              child: Container(
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: _selectedDataUnit ==
+                                                          'MB'
+                                                      ? AppColors
+                                                          .heroGradientStart
+                                                      : Colors.transparent,
+                                                  borderRadius:
+                                                      const BorderRadius
+                                                          .horizontal(
+                                                    left: Radius.circular(11),
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  'MB',
+                                                  style: GoogleFonts.cairo(
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w800,
+                                                    color: _selectedDataUnit ==
+                                                            'MB'
+                                                        ? Colors.white
+                                                        : AppColors.textMuted,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 14),
 

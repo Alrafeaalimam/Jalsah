@@ -94,6 +94,7 @@ class MockProbeRouterOsClient extends RouterOsBinaryClient {
     required String profile,
     String? comment,
     String? timeLimit,
+    int? limitBytesTotal,
   }) async {
     createAttempts++;
     if (throwBrokenPipeOnCreate) {
