@@ -704,6 +704,7 @@ uaN6gRkkqpvjogf39qSzk0Yq59uwENOyyMq2l8pDPqVOZoNXSyO/s3iRfDFgGMNE
 lIBKgbLE9LGPGjBJGw==
 -----END CERTIFICATE-----''';
 
+// TEST ONLY: throwaway self-signed key for a local mock TLS server. Never use anywhere else.
 const _testKeyPem = '''-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDWz2rwoTlugRTm
 ss4wNwbFoyjtRS2wIVhO7wwSPuaCDIFtSxI0rRCrxrQNhj7Rj/r7LhBZpiXEFsSf
